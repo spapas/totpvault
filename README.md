@@ -36,7 +36,7 @@ Back up **vault.dat** to another safe location. It remains encrypted, and the sa
 Install Go 1.26 or later and a 64-bit MinGW-w64 GCC compiler. With Scoop already installed, you can use `scoop install go gcc`; MSYS2 is not required for this route. Ensure `go` and `gcc` are available in CMD:
 
 ```bat
-git clone https://github.com/spapas/totpvault.git
+git clone --branch master https://github.com/spapas/totpvault.git
 cd totpvault
 set CGO_ENABLED=1
 go mod download
@@ -53,7 +53,7 @@ Install Go 1.26 or later, then:
 
 ```sh
 sudo apt-get install gcc pkg-config libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
-git clone https://github.com/spapas/totpvault.git
+git clone --branch master https://github.com/spapas/totpvault.git
 cd totpvault
 go mod download
 go test -race ./...
