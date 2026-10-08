@@ -1,0 +1,49 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: true
+      - name: Linux development libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y gcc pkg-config libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+      - name: Go dependencies
+        run: go mod download
+      - name: Verify dependencies
+        run: go mod verify
+      - name: Tests with race detector
+        run: go test -race ./...
+      - name: Static checks
+        run: go vet ./...
+      - name: Check reachable vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck ./...
+      - name: Build Linux
+        if: runner.os == 'Linux'
+        run: go build -trimpath -ldflags="-s -w" -o dist/totpvault ./cmd/totpvault
+      - name: Build Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          set CGO_ENABLED=1
+          go build -trimpath -ldflags="-s -w -H=windowsgui" -o dist\totpvault.exe ./cmd/totpvault
+      - uses: actions/upload-artifact@v4
+        with:
+          name: totpvault-${{ runner.os }}-amd64
+          path: dist/totpvault*
+          if-no-files-found: error
