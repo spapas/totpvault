@@ -9,7 +9,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
-	"fyne.io/fyne/v2/theme"
 	"github.com/spapas/totpvault/internal/totp"
 	"github.com/spapas/totpvault/internal/vault"
 )
@@ -25,7 +24,7 @@ func (w *clipboardWindow) Clipboard() fyne.Clipboard { return w.clipboard }
 func TestFilteringClipboardAndLock(t *testing.T) {
 	a := test.NewApp()
 	defer a.Quit()
-	a.Settings().SetTheme(theme.DefaultTheme())
+	a.Settings().SetTheme(newAppTheme())
 	path := filepath.Join(t.TempDir(), "vault.dat")
 	s, err := vault.Create(path, "a long test master password")
 	if err != nil {

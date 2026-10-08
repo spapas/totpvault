@@ -42,6 +42,7 @@ type controller struct {
 
 func ShowError(err error) {
 	a := app.New()
+	a.Settings().SetTheme(newAppTheme())
 	w := a.NewWindow("TOTP Vault")
 	w.SetContent(container.NewVBox(widget.NewLabelWithStyle("TOTP Vault could not start", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewLabel(err.Error()), widget.NewButton("Close", a.Quit)))
 	w.ShowAndRun()
@@ -49,6 +50,7 @@ func ShowError(err error) {
 
 func Run(path string) {
 	a := app.NewWithID("io.github.spapas.totpvault")
+	a.Settings().SetTheme(newAppTheme())
 	c := &controller{app: a, w: a.NewWindow("TOTP Vault"), path: path, idle: 5 * time.Minute, selected: -1, stopped: make(chan struct{})}
 	c.w.Resize(fyne.NewSize(720, 520))
 	c.w.SetCloseIntercept(func() { c.lock(); a.Quit() })
