@@ -7,6 +7,8 @@ permissions:
   contents: read
 jobs:
   build:
+    env:
+      GOFLAGS: -trimpath
     strategy:
       fail-fast: false
       matrix:
@@ -18,6 +20,9 @@ jobs:
         with:
           go-version: '1.27.x'
           cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/build.yml
       - name: Linux development libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gcc pkg-config libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
@@ -28,20 +33,20 @@ jobs:
       - name: Tests with race detector
         run: go test -race ./...
       - name: Static checks
-        run: go vet ./...
+        run: go vet -v ./...
       - name: Check reachable vulnerabilities
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           govulncheck ./...
       - name: Build Linux
         if: runner.os == 'Linux'
-        run: go build -trimpath -ldflags="-s -w" -o dist/totpvault ./cmd/totpvault
+        run: go build -v -trimpath -ldflags="-s -w" -o dist/totpvault ./cmd/totpvault
       - name: Build Windows
         if: runner.os == 'Windows'
         shell: cmd
         run: |
           set CGO_ENABLED=1
-          go build -trimpath -ldflags="-s -w -H=windowsgui" -o dist\totpvault.exe ./cmd/totpvault
+          go build -v -trimpath -ldflags="-s -w -H=windowsgui" -o dist\totpvault.exe ./cmd/totpvault
       - uses: actions/upload-artifact@v4
         with:
           name: totpvault-${{ runner.os }}-amd64
