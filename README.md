@@ -16,7 +16,9 @@ A small offline authenticator for Windows and Linux, written in Go with Fyne.
 
 ## Run
 
-Download the Windows or Linux artifact from the repository's **Actions → Build and test** page after a successful run. Extract the archive, then start `totpvault.exe` or `./totpvault`. Linux requires an OpenGL-capable desktop and its normal X11/Wayland compatibility libraries. The Windows executable uses the system OpenGL driver; no Go compiler or WebView is required to run it.
+Download the Windows ZIP or Linux tar.gz from the [latest release](https://github.com/spapas/totpvault/releases/latest). Each release includes both binaries and a `SHA256SUMS` file.
+
+Extract the archive, then start `totpvault.exe` or `./totpvault`. Linux requires an OpenGL-capable desktop and its normal X11/Wayland compatibility libraries. The Windows executable uses the system OpenGL driver; no Go compiler or WebView is required to run it.
 
 On first launch, choose a unique master password with at least 12 characters. A forgotten password cannot be recovered. Click **Add** to enter a Base32 secret, or **Import URI** to paste a provisioning URI. Select an account to copy, edit or delete it.
 
@@ -61,7 +63,11 @@ go build -trimpath -ldflags="-s -w" -o dist/totpvault ./cmd/totpvault
 ./dist/totpvault
 ```
 
-Fyne uses C/OpenGL bindings: ordinary `GOOS=windows go build` from Linux is insufficient. Build natively on each OS or provide a matching cross C compiler. GitHub Actions builds both platforms and uploads binaries automatically.
+Fyne uses C/OpenGL bindings: ordinary `GOOS=windows go build` from Linux is insufficient. Build natively on each OS or provide a matching cross C compiler. GitHub Actions builds and checks both platforms.
+
+## Publishing releases
+
+Update `VERSION` (for example, `0.1.1`) and push to `master`. Once both platforms pass all checks, the workflow creates the matching `v0.1.1` tag and publishes a GitHub Release with a Windows ZIP, Linux tar.gz and checksums. Pushing a `v*` tag matching `VERSION` also publishes that version after the checks pass. Existing published releases are preserved; ordinary commits with the same version do not replace their downloads.
 
 ## Layout
 
