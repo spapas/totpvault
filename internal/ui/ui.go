@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"image/color"
 	"os"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
@@ -154,7 +156,12 @@ func (c *controller) login() {
 		items = append(items, confirm, widget.NewLabel("Use a unique master password of at least 12 characters."), widget.NewLabel("A forgotten password cannot be recovered."))
 	}
 	items = append(items, submit, message)
-	c.w.SetContent(container.NewBorder(nil, widget.NewLabel("Offline • encrypted vault"), nil, nil, container.NewCenter(container.NewVBox(items...))))
+	// CenterLayout uses the form's minimum size. Reserve a comfortable width
+	// while letting the height adapt to validation messages and font settings.
+	formWidth := canvas.NewRectangle(color.Transparent)
+	formWidth.SetMinSize(fyne.NewSize(320, 0))
+	form := container.NewStack(formWidth, container.NewVBox(items...))
+	c.w.SetContent(container.NewBorder(nil, widget.NewLabel("Offline • encrypted vault"), nil, nil, container.NewCenter(form)))
 	c.w.Canvas().Focus(password)
 }
 
