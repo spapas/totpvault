@@ -22,6 +22,14 @@ Download the Windows ZIP or Linux tar.gz from the [latest release](https://githu
 
 Extract the archive, then start `totpvault.exe` or `./totpvault`. Linux requires an OpenGL-capable desktop and its normal X11/Wayland compatibility libraries. The Windows executable uses the system OpenGL driver; no Go compiler or WebView is required to run it.
 
+On Windows with [Scoop](https://scoop.sh), install and update instead via the
+[personal bucket](https://github.com/spapas/scoop-bucket):
+
+```powershell
+scoop bucket add totpvault https://github.com/spapas/scoop-bucket
+scoop install totpvault
+```
+
 On first launch, choose a unique master password with at least 12 characters. A forgotten password cannot be recovered. Click **Add** to enter a Base32 secret, **Import URI** to paste a provisioning URI, or **Paste QR** to decode a QR screenshot from the clipboard (copy it first with Win+Shift+S or your screenshot tool). Select an account to copy, edit or delete it.
 
 The default encrypted file is:
