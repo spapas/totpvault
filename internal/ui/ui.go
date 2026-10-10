@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"image/color"
@@ -16,8 +17,10 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"github.com/spapas/totpvault/internal/qrimg"
 	"github.com/spapas/totpvault/internal/totp"
 	"github.com/spapas/totpvault/internal/vault"
+	"golang.design/x/clipboard"
 )
 
 type controller struct {
@@ -261,9 +264,10 @@ func (c *controller) main() {
 	c.list.OnUnselected = func(widget.ListItemID) { c.selectAccount(-1) }
 	add := widget.NewButtonWithIcon("Add", theme.ContentAddIcon(), func() { c.touch(); c.accountDialog(-1) })
 	importURI := widget.NewButton("Import URI", c.importDialog)
+	pasteQR := widget.NewButton("Paste QR", c.pasteQRImage)
 	lock := widget.NewButtonWithIcon("Lock", theme.LoginIcon(), c.lock)
 	settings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), c.settings)
-	toolbar := container.NewHBox(add, importURI, c.copy, c.edit, c.delete, settings, lock)
+	toolbar := container.NewHBox(add, importURI, pasteQR, c.copy, c.edit, c.delete, settings, lock)
 	c.w.SetContent(container.NewBorder(container.NewVBox(widget.NewLabelWithStyle("TOTP Vault", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.search, toolbar), c.status, nil, nil, c.list))
 	c.filter()
 }
@@ -410,6 +414,68 @@ func (c *controller) importDialog() {
 	}, c.w)
 	d.Resize(fyne.NewSize(560, 180))
 	c.track(d)
+}
+
+// pasteQRImage reads a QR screenshot from the OS clipboard (image, not text),
+// decodes it offline and imports the enclosed otpauth URI. Fyne's own
+// clipboard is text-only, so this uses the OS image clipboard directly.
+func (c *controller) pasteQRImage() {
+	c.touch()
+	if c.session == nil {
+		return
+	}
+	session := c.session
+	if err := clipboard.Init(); err != nil {
+		dialog.ShowError(fmt.Errorf("clipboard unavailable: %w", err), c.w)
+		return
+	}
+	c.status.SetText("Reading QR image from clipboard…")
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		data, err := clipboard.Read(ctx, clipboard.FmtImage)
+		if err != nil {
+			fyne.Do(func() {
+				if c.session != session {
+					return
+				}
+				dialog.ShowError(errors.New("no image in clipboard — copy a QR screenshot first (Win+Shift+S)"), c.w)
+				c.filter()
+			})
+			return
+		}
+		text, err := qrimg.DecodeBytes(data)
+		clear(data)
+		if err != nil {
+			fyne.Do(func() {
+				if c.session != session {
+					return
+				}
+				dialog.ShowError(err, c.w)
+				c.filter()
+			})
+			return
+		}
+		a, err := totp.ParseURI(text)
+		text = ""
+		if err != nil {
+			fyne.Do(func() {
+				if c.session != session {
+					return
+				}
+				dialog.ShowError(fmt.Errorf("QR code is not a valid TOTP URI: %w", err), c.w)
+				c.filter()
+			})
+			return
+		}
+		fyne.Do(func() {
+			if c.session != session {
+				return
+			}
+			c.touch()
+			c.save(append(c.session.Accounts(), a))
+		})
+	}()
 }
 
 func (c *controller) deleteAccount() {

@@ -23,6 +23,12 @@ The encryption key is held in memory only while unlocked and overwritten on lock
 
 Go and the UI/OS use managed memory: string copies, garbage-collected allocations, swap, crash dumps and clipboard history **cannot be guaranteed erased**. Locking is application access control and best-effort cleanup; this is not protection against malware, a debugger, keyloggers or a compromised operating system. Use disk encryption and a trusted computer. Clipboard clearing only affects the current clipboard if it still equals the copied code; it cannot revoke previous copies or clear every OS clipboard-history entry.
 
+## QR paste
+
+`Paste QR` reads an image (not text) from the OS clipboard — Fyne's own clipboard is text-only — and decodes it fully offline with a zero-dependency library. Guardrails: PNG/JPEG only, ≤5 MiB, dimensions ≤4000 px per side and ≤16 M pixels total, single symbol per paste, decoded text ≤8192 chars, then the existing `totp.ParseURI` validation decides. A QR holding anything but a valid `otpauth://totp/...` URI is rejected; nothing is saved on failure. Clipboard bytes are cleared best-effort after decoding; the source image stays in the OS clipboard/history — clear it yourself if the QR photo is sensitive.
+
+Image decoders (PNG/JPEG) and QR detectors enlarge the attack surface versus typed URIs: a malicious screenshot could exploit a decoder bug before validation runs. Pastes are untrusted input — keep dependencies pinned, `govulncheck` clean, and never log image bytes, decoded URIs, or secrets.
+
 ## Threat model
 
 The encrypted vault protects stored secrets when an attacker obtains the file without the master password. A weak password still permits offline guessing. A forgotten master password cannot be recovered. Authenticated encryption detects modification but does not prevent deletion, rollback to an old valid file or loss of the file. Keep encrypted backups and recovery codes. Your clock must be correct; this application does not contact time servers.

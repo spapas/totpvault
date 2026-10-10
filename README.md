@@ -7,6 +7,8 @@ A small offline authenticator for Windows and Linux, written in Go with Fyne.
 - Create and unlock an encrypted vault with a master password.
 - Add, edit, delete and search TOTP accounts.
 - Import `otpauth://totp/...` provisioning URIs.
+- Paste a QR screenshot from the clipboard (`Paste QR`): the image is decoded
+  offline and the enclosed provisioning URI is imported (PNG/JPEG, ≤5 MiB).
 - SHA-1, SHA-256 and SHA-512; 6 or 8 digits; configurable period (default 30 seconds).
 - Live codes and countdown bars; copy the current code to the clipboard.
 - Clear the copied code after 15 seconds, if the clipboard still contains it.
@@ -20,7 +22,7 @@ Download the Windows ZIP or Linux tar.gz from the [latest release](https://githu
 
 Extract the archive, then start `totpvault.exe` or `./totpvault`. Linux requires an OpenGL-capable desktop and its normal X11/Wayland compatibility libraries. The Windows executable uses the system OpenGL driver; no Go compiler or WebView is required to run it.
 
-On first launch, choose a unique master password with at least 12 characters. A forgotten password cannot be recovered. Click **Add** to enter a Base32 secret, or **Import URI** to paste a provisioning URI. Select an account to copy, edit or delete it.
+On first launch, choose a unique master password with at least 12 characters. A forgotten password cannot be recovered. Click **Add** to enter a Base32 secret, **Import URI** to paste a provisioning URI, or **Paste QR** to decode a QR screenshot from the clipboard (copy it first with Win+Shift+S or your screenshot tool). Select an account to copy, edit or delete it.
 
 The default encrypted file is:
 
@@ -75,9 +77,10 @@ Update `VERSION` (for example, `0.1.1`) and push to `master`. Once both platform
 |---|---|
 | `cmd/totpvault` | Entry point, paths, exclusive instance lock |
 | `internal/totp` | RFC 6238 generation and provisioning URI parsing |
+| `internal/qrimg` | Offline QR image decode (clipboard PNG/JPEG → URI text) |
 | `internal/vault` | Password derivation, authenticated encryption, atomic saves |
 | `internal/ui` | Fyne desktop UI and session lifecycle |
 
-See [SECURITY.md](SECURITY.md) for the format, threat model and limitations. See [docs/VALIDATION.md](docs/VALIDATION.md) for the checks performed on the initial implementation.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for component and data-flow overview, [SECURITY.md](SECURITY.md) for the format, threat model and limitations, and [docs/VALIDATION.md](docs/VALIDATION.md) for the checks performed on the initial implementation. Agents contributing code should start with [AGENTS.md](AGENTS.md).
 
-QR image/camera import and authenticator-specific bulk exports are not implemented in this version.
+QR image/camera import and authenticator-specific bulk exports are not implemented in this version, except for single QR screenshots pasted from the clipboard.
