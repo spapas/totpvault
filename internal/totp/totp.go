@@ -97,6 +97,40 @@ func Code(a Account, now time.Time) (string, int, error) {
 	return fmt.Sprintf("%0*d", a.Digits, number%modulus), a.Period - int(now.Unix()%int64(a.Period)), nil
 }
 
+func ProvisioningURI(a Account) (string, error) {
+	a, err := Normalize(a)
+	if err != nil {
+		return "", err
+	}
+	label := a.Name
+	escapedLabel := escapeLabelPart(a.Name)
+	if a.Issuer != "" {
+		label = a.Issuer + ":" + a.Name
+		escapedLabel = escapeLabelPart(a.Issuer) + ":" + escapedLabel
+	}
+	u := url.URL{
+		Scheme:  "otpauth",
+		Host:    "totp",
+		Path:    "/" + label,
+		RawPath: "/" + escapedLabel,
+	}
+	q := url.Values{
+		"secret":    {a.Secret},
+		"algorithm": {a.Algorithm},
+		"digits":    {strconv.Itoa(a.Digits)},
+		"period":    {strconv.Itoa(a.Period)},
+	}
+	if a.Issuer != "" {
+		q.Set("issuer", a.Issuer)
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+func escapeLabelPart(s string) string {
+	return strings.ReplaceAll(url.PathEscape(s), ":", "%3A")
+}
+
 // ParseURI accepts TOTP provisioning URIs only; HOTP and unknown options fail closed.
 func ParseURI(raw string) (Account, error) {
 	var a Account
@@ -121,9 +155,18 @@ func ParseURI(raw string) (Account, error) {
 			return a, fmt.Errorf("unsupported parameter: %s", k)
 		}
 	}
-	a.Name = strings.TrimPrefix(u.Path, "/")
+	label, err := url.PathUnescape(strings.TrimPrefix(u.EscapedPath(), "/"))
+	if err != nil {
+		return a, errors.New("invalid URI label")
+	}
+	a.Name = label
 	a.Issuer = q.Get("issuer")
-	if prefix, name, ok := strings.Cut(a.Name, ":"); ok {
+	if escapedPrefix, escapedName, ok := strings.Cut(strings.TrimPrefix(u.EscapedPath(), "/"), ":"); ok {
+		prefix, prefixErr := url.PathUnescape(escapedPrefix)
+		name, nameErr := url.PathUnescape(escapedName)
+		if prefixErr != nil || nameErr != nil {
+			return a, errors.New("invalid URI label")
+		}
 		prefix = strings.TrimSpace(prefix)
 		if a.Issuer != "" && a.Issuer != prefix {
 			return a, errors.New("issuer does not match label")

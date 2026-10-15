@@ -50,3 +50,19 @@ func TestBoundaryAndURI(t *testing.T) {
 		}
 	}
 }
+
+func TestProvisioningURIRoundTrip(t *testing.T) {
+	for _, a := range []Account{
+		{Name: "user@example.com", Issuer: "Example: Service", Secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", Digits: 8, Period: 60, Algorithm: "SHA256"},
+		{Name: "account:with/slash", Secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", Digits: 6, Period: 30, Algorithm: "SHA1"},
+	} {
+		raw, err := ProvisioningURI(a)
+		if err != nil {
+			t.Fatalf("format: %v", err)
+		}
+		got, err := ParseURI(raw)
+		if err != nil || got != a {
+			t.Fatalf("round trip: got %+v, want %+v; URI %q; err %v", got, a, raw, err)
+		}
+	}
+}

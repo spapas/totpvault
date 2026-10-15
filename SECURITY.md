@@ -21,7 +21,7 @@ Writes use a same-directory temporary file containing ciphertext only, sync it, 
 
 The encryption key is held in memory only while unlocked and overwritten on lock. Account references and GUI content are discarded. Password input fields are cleared after submission. Auto-lock uses application interactions (typing in forms/search, selection, button clicks) as activity; moving the mouse or watching the countdown does not reset it. Settings are per session and revert to a 5-minute timeout on restart.
 
-Go and the UI/OS use managed memory: string copies, garbage-collected allocations, swap, crash dumps and clipboard history **cannot be guaranteed erased**. Locking is application access control and best-effort cleanup; this is not protection against malware, a debugger, keyloggers or a compromised operating system. Use disk encryption and a trusted computer. Clipboard clearing only affects the current clipboard if it still equals the copied code; it cannot revoke previous copies or clear every OS clipboard-history entry.
+Go and the UI/OS use managed memory: string copies, garbage-collected allocations, swap, crash dumps and clipboard history **cannot be guaranteed erased**. Locking is application access control and best-effort cleanup; this is not protection against malware, a debugger, keyloggers or a compromised operating system. Exporting an account copies its provisioning URI, including the TOTP secret, to the clipboard only after confirmation. Clipboard clearing after 15 seconds only affects the current clipboard if it still equals the copied code or URI; it cannot revoke previous copies or clear every OS clipboard-history entry.
 
 ## QR paste
 

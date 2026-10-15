@@ -24,23 +24,23 @@ import (
 )
 
 type controller struct {
-	app                fyne.App
-	w                  fyne.Window
-	path               string
-	session            *vault.Session
-	accounts           []totp.Account
-	visible            []int
-	selected           int
-	list               *widget.List
-	search             *widget.Entry
-	edit, delete, copy *widget.Button
-	status             *widget.Label
-	lastActivity       time.Time
-	idle               time.Duration
-	clipboard          string
-	clipboardUntil     time.Time
-	dialogs            []dialog.Dialog
-	stopped            chan struct{}
+	app                        fyne.App
+	w                          fyne.Window
+	path                       string
+	session                    *vault.Session
+	accounts                   []totp.Account
+	visible                    []int
+	selected                   int
+	list                       *widget.List
+	search                     *widget.Entry
+	edit, delete, copy, export *widget.Button
+	status                     *widget.Label
+	lastActivity               time.Time
+	idle                       time.Duration
+	clipboard                  string
+	clipboardUntil             time.Time
+	dialogs                    []dialog.Dialog
+	stopped                    chan struct{}
 }
 
 func ShowError(err error) {
@@ -223,6 +223,7 @@ func (c *controller) main() {
 	c.copy = widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), c.copyCode)
 	c.edit = widget.NewButtonWithIcon("Edit", theme.DocumentCreateIcon(), func() { c.touch(); c.accountDialog(c.selected) })
 	c.delete = widget.NewButtonWithIcon("Delete", theme.DeleteIcon(), c.deleteAccount)
+	c.export = widget.NewButton("Export", c.exportAccount)
 	c.selectAccount(-1)
 	c.list = widget.NewList(func() int { return len(c.visible) }, func() fyne.CanvasObject {
 		code := widget.NewLabelWithStyle("000 000", fyne.TextAlignTrailing, fyne.TextStyle{Monospace: true, Bold: true})
@@ -267,7 +268,7 @@ func (c *controller) main() {
 	pasteQR := widget.NewButton("Paste QR", c.pasteQRImage)
 	lock := widget.NewButtonWithIcon("Lock", theme.LoginIcon(), c.lock)
 	settings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), c.settings)
-	toolbar := container.NewHBox(add, importURI, pasteQR, c.copy, c.edit, c.delete, settings, lock)
+	toolbar := container.NewHBox(add, importURI, pasteQR, c.copy, c.edit, c.delete, c.export, settings, lock)
 	c.w.SetContent(container.NewBorder(container.NewVBox(widget.NewLabelWithStyle("TOTP Vault", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.search, toolbar), c.status, nil, nil, c.list))
 	c.filter()
 }
@@ -291,7 +292,7 @@ func (c *controller) filter() {
 
 func (c *controller) selectAccount(index int) {
 	c.selected = index
-	for _, b := range []*widget.Button{c.copy, c.edit, c.delete} {
+	for _, b := range []*widget.Button{c.copy, c.edit, c.delete, c.export} {
 		if b == nil {
 			continue
 		}
@@ -316,7 +317,32 @@ func (c *controller) copyCode() {
 	c.w.Clipboard().SetContent(code)
 	c.clipboard = code
 	c.clipboardUntil = time.Now().Add(15 * time.Second)
-	c.status.SetText("Code copied • clipboard clears in 15 seconds")
+	c.status.SetText("Copied to clipboard • clears in 15 seconds")
+}
+
+func (c *controller) exportAccount() {
+	c.touch()
+	if c.session == nil || c.selected < 0 || c.selected >= len(c.accounts) {
+		return
+	}
+	session, index := c.session, c.selected
+	uri, err := totp.ProvisioningURI(c.accounts[index])
+	if err != nil {
+		dialog.ShowError(err, c.w)
+		return
+	}
+	d := dialog.NewConfirm("Export TOTP account", "The provisioning URI contains this account’s secret key. Copy it to the clipboard for import in another app? The clipboard will be cleared after 15 seconds if unchanged.", func(ok bool) {
+		defer func() { uri = "" }()
+		if !ok || c.session != session {
+			return
+		}
+		c.touch()
+		c.w.Clipboard().SetContent(uri)
+		c.clipboard = uri
+		c.clipboardUntil = time.Now().Add(15 * time.Second)
+		c.status.SetText("Provisioning URI copied • clipboard clears in 15 seconds")
+	}, c.w)
+	c.track(d)
 }
 
 func (c *controller) save(accounts []totp.Account) bool {
