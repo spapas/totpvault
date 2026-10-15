@@ -122,6 +122,8 @@ func ProvisioningURI(a Account) (string, error) {
 	}
 	if a.Issuer != "" {
 		q.Set("issuer", a.Issuer)
+	} else if strings.Contains(a.Name, ":") {
+		q.Set("issuer", "")
 	}
 	u.RawQuery = q.Encode()
 	return u.String(), nil
@@ -155,23 +157,41 @@ func ParseURI(raw string) (Account, error) {
 			return a, fmt.Errorf("unsupported parameter: %s", k)
 		}
 	}
-	label, err := url.PathUnescape(strings.TrimPrefix(u.EscapedPath(), "/"))
+	escapedLabel := strings.TrimPrefix(u.EscapedPath(), "/")
+	label, err := url.PathUnescape(escapedLabel)
 	if err != nil {
 		return a, errors.New("invalid URI label")
 	}
 	a.Name = label
 	a.Issuer = q.Get("issuer")
-	if escapedPrefix, escapedName, ok := strings.Cut(strings.TrimPrefix(u.EscapedPath(), "/"), ":"); ok {
-		prefix, prefixErr := url.PathUnescape(escapedPrefix)
-		name, nameErr := url.PathUnescape(escapedName)
-		if prefixErr != nil || nameErr != nil {
-			return a, errors.New("invalid URI label")
+	foundSeparator := false
+	matchedSeparator := false
+	if !(q.Has("issuer") && a.Issuer == "") {
+		for i := 0; i < len(escapedLabel); i++ {
+			if escapedLabel[i] != ':' && !(i+2 < len(escapedLabel) && escapedLabel[i] == '%' && escapedLabel[i+1] == '3' && (escapedLabel[i+2] == 'A' || escapedLabel[i+2] == 'a')) {
+				continue
+			}
+			foundSeparator = true
+			prefix, prefixErr := url.PathUnescape(escapedLabel[:i])
+			nameStart := i + 1
+			if escapedLabel[i] == '%' {
+				nameStart = i + 3
+			}
+			name, nameErr := url.PathUnescape(escapedLabel[nameStart:])
+			if prefixErr != nil || nameErr != nil {
+				return a, errors.New("invalid URI label")
+			}
+			prefix = strings.TrimSpace(prefix)
+			if a.Issuer != "" && a.Issuer != prefix {
+				continue
+			}
+			a.Issuer, a.Name = prefix, strings.TrimSpace(name)
+			matchedSeparator = true
+			break
 		}
-		prefix = strings.TrimSpace(prefix)
-		if a.Issuer != "" && a.Issuer != prefix {
-			return a, errors.New("issuer does not match label")
-		}
-		a.Issuer, a.Name = prefix, strings.TrimSpace(name)
+	}
+	if foundSeparator && q.Get("issuer") != "" && !matchedSeparator {
+		return a, errors.New("issuer does not match label")
 	}
 	a.Secret, a.Algorithm = q.Get("secret"), q.Get("algorithm")
 	if q.Has("digits") {
