@@ -97,6 +97,42 @@ func Code(a Account, now time.Time) (string, int, error) {
 	return fmt.Sprintf("%0*d", a.Digits, number%modulus), a.Period - int(now.Unix()%int64(a.Period)), nil
 }
 
+func ProvisioningURI(a Account) (string, error) {
+	a, err := Normalize(a)
+	if err != nil {
+		return "", err
+	}
+	label := a.Name
+	escapedLabel := escapeLabelPart(a.Name)
+	if a.Issuer != "" {
+		label = a.Issuer + ":" + a.Name
+		escapedLabel = escapeLabelPart(a.Issuer) + ":" + escapedLabel
+	}
+	u := url.URL{
+		Scheme:  "otpauth",
+		Host:    "totp",
+		Path:    "/" + label,
+		RawPath: "/" + escapedLabel,
+	}
+	q := url.Values{
+		"secret":    {a.Secret},
+		"algorithm": {a.Algorithm},
+		"digits":    {strconv.Itoa(a.Digits)},
+		"period":    {strconv.Itoa(a.Period)},
+	}
+	if a.Issuer != "" {
+		q.Set("issuer", a.Issuer)
+	} else if strings.Contains(a.Name, ":") {
+		q.Set("issuer", "")
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+func escapeLabelPart(s string) string {
+	return strings.ReplaceAll(url.PathEscape(s), ":", "%3A")
+}
+
 // ParseURI accepts TOTP provisioning URIs only; HOTP and unknown options fail closed.
 func ParseURI(raw string) (Account, error) {
 	var a Account
@@ -121,14 +157,41 @@ func ParseURI(raw string) (Account, error) {
 			return a, fmt.Errorf("unsupported parameter: %s", k)
 		}
 	}
-	a.Name = strings.TrimPrefix(u.Path, "/")
+	escapedLabel := strings.TrimPrefix(u.EscapedPath(), "/")
+	label, err := url.PathUnescape(escapedLabel)
+	if err != nil {
+		return a, errors.New("invalid URI label")
+	}
+	a.Name = label
 	a.Issuer = q.Get("issuer")
-	if prefix, name, ok := strings.Cut(a.Name, ":"); ok {
-		prefix = strings.TrimSpace(prefix)
-		if a.Issuer != "" && a.Issuer != prefix {
-			return a, errors.New("issuer does not match label")
+	foundSeparator := false
+	matchedSeparator := false
+	if !(q.Has("issuer") && a.Issuer == "") {
+		for i := 0; i < len(escapedLabel); i++ {
+			if escapedLabel[i] != ':' && !(i+2 < len(escapedLabel) && escapedLabel[i] == '%' && escapedLabel[i+1] == '3' && (escapedLabel[i+2] == 'A' || escapedLabel[i+2] == 'a')) {
+				continue
+			}
+			foundSeparator = true
+			prefix, prefixErr := url.PathUnescape(escapedLabel[:i])
+			nameStart := i + 1
+			if escapedLabel[i] == '%' {
+				nameStart = i + 3
+			}
+			name, nameErr := url.PathUnescape(escapedLabel[nameStart:])
+			if prefixErr != nil || nameErr != nil {
+				return a, errors.New("invalid URI label")
+			}
+			prefix = strings.TrimSpace(prefix)
+			if a.Issuer != "" && a.Issuer != prefix {
+				continue
+			}
+			a.Issuer, a.Name = prefix, strings.TrimSpace(name)
+			matchedSeparator = true
+			break
 		}
-		a.Issuer, a.Name = prefix, strings.TrimSpace(name)
+	}
+	if foundSeparator && q.Get("issuer") != "" && !matchedSeparator {
+		return a, errors.New("issuer does not match label")
 	}
 	a.Secret, a.Algorithm = q.Get("secret"), q.Get("algorithm")
 	if q.Has("digits") {

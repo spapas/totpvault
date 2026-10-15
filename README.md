@@ -7,11 +7,12 @@ A small offline authenticator for Windows and Linux, written in Go with Fyne.
 - Create and unlock an encrypted vault with a master password.
 - Add, edit, delete and search TOTP accounts.
 - Import `otpauth://totp/...` provisioning URIs.
+- Export a selected account as a provisioning URI for import in another app.
 - Paste a QR screenshot from the clipboard (`Paste QR`): the image is decoded
   offline and the enclosed provisioning URI is imported (PNG/JPEG, ≤5 MiB).
 - SHA-1, SHA-256 and SHA-512; 6 or 8 digits; configurable period (default 30 seconds).
 - Live codes and countdown bars; copy the current code to the clipboard.
-- Clear the copied code after 15 seconds, if the clipboard still contains it.
+- Clear copied codes and exported URIs after 15 seconds, if the clipboard still contains them.
 - Manual lock and auto-lock after 5 minutes of inactivity (1–15 minutes per session).
 - Change the master password from Settings.
 - No server, account registration, telemetry or network requests.
@@ -31,6 +32,8 @@ scoop install totpvault
 ```
 
 On first launch, choose a unique master password with at least 12 characters. A forgotten password cannot be recovered. Click **Add** to enter a Base32 secret, **Import URI** to paste a provisioning URI, or **Paste QR** to decode a QR screenshot from the clipboard (copy it first with Win+Shift+S or your screenshot tool). Select an account to copy, edit or delete it.
+
+Select an account and choose **Export** to copy its `otpauth://` provisioning URI for another authenticator. The URI contains the account's TOTP secret; it is copied only after confirmation and the clipboard is cleared after 15 seconds if unchanged. Other apps or clipboard history may retain a copy.
 
 The default encrypted file is:
 

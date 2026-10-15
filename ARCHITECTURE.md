@@ -53,6 +53,8 @@ also the vault payload unit.
 - `Code(a, now)` — re-normalizes, rejects pre-epoch clocks, HMAC-SHA*
   over 8-byte big-endian `floor(unix/period)`, dynamic truncation,
   `mod 10^digits`, zero-padded. Returns `(code, secondsRemaining, err)`.
+- `ProvisioningURI(account)` — validates and formats one account as an
+  `otpauth://totp/...` URI, preserving encoded label characters and TOTP settings.
 - `ParseURI(raw)` — accepts **only** `otpauth://totp/...` (≤8192 chars, no
   userinfo/fragment). Rejects duplicate params and any query key outside
   `{secret, issuer, algorithm, digits, period}` — so `HOTP`, `lock`, `image`,
@@ -122,12 +124,14 @@ controller{app, w, path, session *vault.Session, accounts, visible []int,
   (Argon2id ~blocks), then `fyne.Do` back to UI thread: error → re-enable + message;
   success → `c.session/c.accounts=touch()+main()`. `stopped` checked so quit-during-KDF
   locks the stray session.
-- `main()` — search entry + toolbar (Add / Import URI / Paste QR / Copy / Edit / Delete /
+- `main()` — search entry + toolbar (Add / Import URI / Paste QR / Copy / Edit / Delete / Export /
   Settings / Lock) + `widget.List`. List rows: left (name bold + issuer), right
   (monospace code `123 456`/`1234 5678`, `Ns` countdown, progress bar `remaining/period`).
   `OnSelected/OnUnselected` → `selectAccount` (enables/disables Copy/Edit/Delete).
 - Dialogs: `accountDialog` (Add/Edit with name/issuer/secret/digits/period/algorithm,
   validates via `Normalize`), `importDialog` (password entry for URI, `ParseURI`),
+  `exportAccount` (confirmation before copying one account's secret-bearing URI;
+  clipboard expires after 15 seconds if unchanged),
   `deleteAccount` (confirm), `settings` (idle 1/2/5/10/15 min + optional password change).
 
 ### 5.2 Invariants agents must keep

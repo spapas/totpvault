@@ -50,3 +50,41 @@ func TestBoundaryAndURI(t *testing.T) {
 		}
 	}
 }
+
+func TestProvisioningURIRoundTrip(t *testing.T) {
+	for _, a := range []Account{
+		{Name: "user@example.com", Issuer: "Example: Service", Secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", Digits: 8, Period: 60, Algorithm: "SHA256"},
+		{Name: "account:with/slash", Secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", Digits: 6, Period: 30, Algorithm: "SHA1"},
+	} {
+		raw, err := ProvisioningURI(a)
+		if err != nil {
+			t.Fatalf("format: %v", err)
+		}
+		got, err := ParseURI(raw)
+		if err != nil || got != a {
+			t.Fatalf("round trip: got %+v, want %+v; URI %q; err %v", got, a, raw, err)
+		}
+	}
+}
+
+func TestEncodedIssuerSeparator(t *testing.T) {
+	secret := "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+	for _, tc := range []struct {
+		raw        string
+		wantIssuer string
+		wantName   string
+		wantErr    bool
+	}{
+		{"otpauth://totp/Example%3Aalice?issuer=Example&secret=" + secret, "Example", "alice", false},
+		{"otpauth://totp/Example%3Aalice?issuer=Other&secret=" + secret, "", "", true},
+		{"otpauth://totp/Example%3Aalice?secret=" + secret, "Example", "alice", false},
+	} {
+		got, err := ParseURI(tc.raw)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("ParseURI(%q) error = %v, wantErr %v", tc.raw, err, tc.wantErr)
+		}
+		if !tc.wantErr && (got.Issuer != tc.wantIssuer || got.Name != tc.wantName) {
+			t.Fatalf("ParseURI(%q) = issuer %q, name %q; want issuer %q, name %q", tc.raw, got.Issuer, got.Name, tc.wantIssuer, tc.wantName)
+		}
+	}
+}
