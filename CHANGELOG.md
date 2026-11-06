@@ -5,12 +5,14 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-07
+
 ### Changed
 
 - Toolbar is one row (account actions + overflow ⋯ menu for Import / Paste /
-  Settings / About / Lock); Ctrl+C copies the selected code (skipped in
-  dialogs and text fields); rows are condensed to code+countdown on one
-  line over the progress bar.
+  Settings / About / Lock) instead of two rows; Ctrl+C copies the selected
+  code (skipped in dialogs and text fields); rows are condensed to
+  code+countdown on one line over the progress bar.
 
 ## [1.1.0] - 2026-11-06
 
