@@ -5,6 +5,14 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+### Added
+
+- Interface languages: English (source), French, German, Italian, Spanish,
+  Chinese (Simplified) and Greek. OS language auto-detected, switchable in
+  Settings, persisted in app preferences. Backend validation errors are shown
+  translated via the new offline `internal/i18n` package (no new
+  dependencies; `go-locale` promoted from indirect to direct).
+
 ## [0.3.0] - 2026-11-06
 
 ### Added

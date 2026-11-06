@@ -17,6 +17,7 @@ A small offline authenticator for Windows and Linux, written in Go with Fyne.
 - Clear copied codes and exported URIs after 15 seconds, if the clipboard still contains them.
 - Manual lock and auto-lock after 5 minutes of inactivity (1–15 minutes per session, wall-clock backstop for sleep).
 - Change the master password from Settings. About dialog shows the vault path and backup reminder.
+- Interface in English, French, German, Italian, Spanish, Chinese (Simplified) and Greek (auto-detected, switchable in Settings).
 - No server, account registration, telemetry or network requests.
 
 ## Run
@@ -93,6 +94,7 @@ Update `VERSION` (for example, `0.1.1`) and push to `master`. Once both platform
 | `internal/qrimg` | Offline QR image decode (clipboard PNG/JPEG → URI text) |
 | `internal/vault` | Password derivation, authenticated encryption, atomic saves |
 | `internal/ui` | Fyne desktop UI and session lifecycle |
+| `internal/i18n` | Offline UI translations (EN source; FR/DE/IT/ES/ZH/EL), OS language detect |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for component and data-flow overview, [SECURITY.md](SECURITY.md) for the format, threat model and limitations, and [docs/VALIDATION.md](docs/VALIDATION.md) for the checks performed on the initial implementation. Agents contributing code should start with [AGENTS.md](AGENTS.md).
 

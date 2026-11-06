@@ -118,6 +118,14 @@ controller{app, w, path, session *vault.Session, accounts, visible []int,
 
 ### 5.1 Screens
 
+Screens render through `controller.t()` from the offline `internal/i18n`
+package: English message IDs with FR/DE/IT/ES/ZH/EL tables, plural-aware
+status lines, translated backend errors at the display boundary (`errText`).
+`Run` loads the saved `language` app preference or auto-detects the OS
+language (`i18n.Detect`); Settings offers a language selector that persists
+the tag (non-secret) and rebuilds the current screen. `totp`/`vault`/`qrimg`
+keep returning English errors untouched — translation never alters validation.
+
 - `Run(path)` — `app.NewWithID`, theme, 720×520 window, close-intercept → `lock()+Quit`,
   starts 500 ms goroutine (`fyne.Do(c.tick)`), `ShowAndRun`, on exit `close(stopped)` +
   `fyne.DoAndWait` final lock (drains a KDF completion queued just before close).
@@ -196,13 +204,15 @@ plus reject empty / non-image / QR-less / oversize inputs.
   via modal `ShowError` window.
 - **No network:** `go.mod` = Fyne + `gofrs/flock` + `x/crypto` + `golang.design/x/clipboard`
   (OS image clipboard, Cgo-free) + `piglig/go-qr/v2` (offline QR decode, zero runtime
-  deps) only. Adding any dialing dependency violates the threat model.
+  deps) + `jeandeaual/go-locale` (OS language detect, offline) only. Adding any dialing dependency violates the threat model.
 - **Testing:** `totp_test.go` (18 RFC 6238 vectors, countdown, URI accept/reject, validation edges),
   `vault_test.go` (round-trip, no-plaintext-on-disk, wrong-pw, O_EXCL, tamper/truncate,
   nonce-freshness, rotation, stale-write, limits, password policy), `qrimg_test.go` (QR round-trip from RFC
   secret, non-TOTP QR still decodes but `ParseURI` rejects it, empty/non-image/
-  QR-less/oversize rejection), `ui_test.go` (Fyne test driver:
-  filter, copy, clipboard-expiry, auto-lock). See `docs/VALIDATION.md`.
+  QR-less/oversize rejection), `i18n_test.go` (all languages cover all keys,
+  format verbs match, fallback, plural rules, error translation),
+  `ui_test.go` + `internal/ui/i18n_test.go` (Fyne test driver:
+  filter, copy, clipboard-expiry, auto-lock, language switch). See `docs/VALIDATION.md`.
 - **Build/release:** native CGO builds per OS (see `AGENTS.md`); `.github/workflows/build.yml`
   matrix tests/vets/govulnchecks/builds both OS, then on `master`/`v*` packages via
   `scripts/package_release.py` (magic-check `MZ`/`ELF`, zip/tar.gz + docs, `SHA256SUMS`)
