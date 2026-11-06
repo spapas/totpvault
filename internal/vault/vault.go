@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"unicode/utf8"
 
 	"github.com/spapas/totpvault/internal/totp"
@@ -77,6 +78,9 @@ func Create(path, password string) (*Session, error) {
 	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		s.Lock()
 		return nil, err
+	}
+	if runtime.GOOS != "windows" {
+		_ = os.Chmod(filepath.Dir(path), 0700)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
@@ -237,6 +241,7 @@ func (s *Session) ChangePassword(password string) error {
 	}
 	clear(s.key)
 	s.key, s.salt = next.key, salt
+	next.key = nil
 	return nil
 }
 
@@ -254,6 +259,9 @@ func writeSync(f *os.File, b []byte) error {
 func (s *Session) replace(b []byte) error {
 	old, err := read(s.path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return ErrChanged
+		}
 		return err
 	}
 	if sha256.Sum256(old) != s.fingerprint {

@@ -189,7 +189,7 @@ plus reject empty / non-image / QR-less / oversize inputs.
   `vault_test.go` (round-trip, no-plaintext-on-disk, wrong-pw, O_EXCL, tamper/truncate,
   nonce-freshness, rotation, stale-write), `qrimg_test.go` (QR round-trip from RFC
   secret, non-TOTP QR still decodes but `ParseURI` rejects it, empty/non-image/
-  QR-less/oversize rejection), `ui_test.go -tags ci` (Fyne test driver:
+  QR-less/oversize rejection), `ui_test.go` (Fyne test driver:
   filter, copy, clipboard-expiry, auto-lock). See `docs/VALIDATION.md`.
 - **Build/release:** native CGO builds per OS (see `AGENTS.md`); `.github/workflows/build.yml`
   matrix tests/vets/govulnchecks/builds both OS, then on `master`/`v*` packages via

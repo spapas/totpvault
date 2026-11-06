@@ -42,6 +42,11 @@ func main() {
 		ui.ShowError(err)
 		return
 	}
+	if runtime.GOOS != "windows" {
+		// MkdirAll is a no-op for pre-existing dirs; tighten one that
+		// was created lax (e.g. under /tmp) before we rely on it.
+		_ = os.Chmod(filepath.Dir(abs), 0700)
+	}
 	lock := flock.New(abs + ".lock")
 	ok, err := lock.TryLock()
 	if err != nil {

@@ -50,7 +50,7 @@ go test -race ./...
 go build -trimpath -ldflags="-s -w" -o dist/totpvault ./cmd/totpvault
 ```
 
-Tags: `ui_test.go` uses `-tags ci` for the Fyne software test driver in headless CI.
+UI tests: `ui_test.go` uses the Fyne software test driver (`test.NewApp`), no build tag needed.
 Native runs use the real desktop driver.
 
 ## Rules — do not break these
@@ -75,12 +75,13 @@ Native runs use the real desktop driver.
    of secrets outside `Session`.
 5. **UI session discipline.** All mutations go through `controller.save()` →
    `Session.Save()` → `filter()`. Dialogs capture `session` pointer and abort if
-   `c.session != session` (locked meanwhile). Activity = form/search/selection/button
-   only; countdown/mouse-move must NOT reset `lastActivity`. Clipboard clears after
-   15 s only if content still equals copied code. Settings (idle 1–15 min) are
+   `c.session != session` (locked meanwhile); edit/delete also verify the
+   account index still holds the same account. Activity = form/search/selection/button
+   only; countdown/mouse-move must NOT reset `lastActivity`/`lastWallUnix`. Clipboard clears after
+   15 s only if content still equals copied code or URI. Settings (idle 1–15 min) are
    per-session, default 5 min.
 6. **Keep it offline.** No new dependencies that dial network, no auto-update,
-   no QR/camera, no bulk export. Pinned offline exceptions: `golang.design/x/clipboard`
+   no camera capture, no bulk export/import. Pinned offline exceptions: `golang.design/x/clipboard`
    (OS image clipboard, Cgo-free) + `piglig/go-qr/v2` (pure decode, zero runtime deps).
    If you add a dep, keep `go.mod` tidy and ensure `govulncheck` stays clean.
 7. **Permissions.** POSIX vault `0600`, dirs `0700`. Windows relies on profile ACLs —

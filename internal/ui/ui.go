@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,10 +37,13 @@ type controller struct {
 	edit, delete, copy, export *widget.Button
 	status                     *widget.Label
 	lastActivity               time.Time
+	lastWallUnix               int64
 	idle                       time.Duration
+	hideCodes                  bool
 	clipboard                  string
 	clipboardUntil             time.Time
 	dialogs                    []dialog.Dialog
+	clearOnLock                []func()
 	stopped                    chan struct{}
 }
 
@@ -72,19 +76,58 @@ func Run(path string) {
 	}()
 	c.w.ShowAndRun()
 	close(c.stopped)
-	if c.session != nil {
-		c.session.Lock()
+	// Drain any queued UI work (e.g. a KDF completion queued just before
+	// close) before the final lock, so a fresh session can't be assigned
+	// after we checked it. Runs on the UI thread, same as all mutations.
+	fyne.DoAndWait(func() {
+		if c.session != nil {
+			c.session.Lock()
+			c.session = nil
+		}
+	})
+}
+
+func (c *controller) touch() {
+	now := time.Now()
+	c.lastActivity = now
+	c.lastWallUnix = now.Unix()
+}
+
+func (c *controller) track(d dialog.Dialog, clear func()) {
+	c.dialogs = append(c.dialogs, d)
+	if clear != nil {
+		c.clearOnLock = append(c.clearOnLock, clear)
+	}
+	d.Show()
+}
+
+func (c *controller) untrack(d dialog.Dialog) {
+	for i, e := range c.dialogs {
+		if e == d {
+			c.dialogs = append(c.dialogs[:i], c.dialogs[i+1:]...)
+			break
+		}
+	}
+	// Drop one cleanup to keep the two slices aligned; the dialog's own
+	// deferred SetText("") already ran on normal dismiss.
+	if len(c.clearOnLock) > 0 {
+		c.clearOnLock = c.clearOnLock[:len(c.clearOnLock)-1]
 	}
 }
 
-func (c *controller) touch()                { c.lastActivity = time.Now() }
-func (c *controller) track(d dialog.Dialog) { c.dialogs = append(c.dialogs, d); d.Show() }
-
 func (c *controller) login() {
-	_, err := os.Stat(c.path)
+	info, err := os.Stat(c.path)
 	create := os.IsNotExist(err)
 	if err != nil && !create {
-		c.w.SetContent(container.NewVBox(widget.NewLabel("Cannot read vault"), widget.NewLabel(err.Error())))
+		retry := widget.NewButton("Retry", func() { c.login() })
+		quit := widget.NewButton("Quit", func() { c.app.Quit() })
+		c.w.SetContent(container.NewVBox(widget.NewLabel("Cannot read vault"), widget.NewLabel(err.Error()), container.NewHBox(retry, quit)))
+		return
+	}
+	if err == nil && info.IsDir() {
+		retry := widget.NewButton("Retry", func() { c.login() })
+		quit := widget.NewButton("Quit", func() { c.app.Quit() })
+		c.w.SetContent(container.NewVBox(widget.NewLabel("Cannot read vault"), widget.NewLabel("vault path is a directory"), container.NewHBox(retry, quit)))
 		return
 	}
 	password := widget.NewPasswordEntry()
@@ -171,6 +214,10 @@ func (c *controller) login() {
 }
 
 func (c *controller) lock() {
+	for _, clear := range c.clearOnLock {
+		clear()
+	}
+	c.clearOnLock = nil
 	for _, d := range c.dialogs {
 		d.Hide()
 	}
@@ -205,7 +252,10 @@ func (c *controller) tick() {
 	if c.session == nil {
 		return
 	}
-	if now.Sub(c.lastActivity) >= c.idle {
+	// Monotonic clock pauses during suspend, so also check wall time to
+	// lock after sleep/hibernate even if monotonic elapsed stays small.
+	wallElapsed := now.Unix() - c.lastWallUnix
+	if now.Sub(c.lastActivity) >= c.idle || (c.lastWallUnix != 0 && wallElapsed >= int64(c.idle/time.Second)) {
 		c.lock()
 		return
 	}
@@ -220,6 +270,7 @@ func (c *controller) main() {
 	c.search.SetPlaceHolder("Search accounts")
 	c.search.OnChanged = func(string) { c.touch(); c.filter() }
 	c.status = widget.NewLabel("")
+	c.status.Wrapping = fyne.TextWrapBreak
 	c.copy = widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), c.copyCode)
 	c.edit = widget.NewButtonWithIcon("Edit", theme.DocumentCreateIcon(), func() { c.touch(); c.accountDialog(c.selected) })
 	c.delete = widget.NewButtonWithIcon("Delete", theme.DeleteIcon(), c.deleteAccount)
@@ -243,6 +294,14 @@ func (c *controller) main() {
 		right := row.Objects[1].(*fyne.Container)
 		left.Objects[0].(*widget.Label).SetText(a.Name)
 		left.Objects[1].(*widget.Label).SetText(a.Issuer)
+		if c.hideCodes && c.visible[id] != c.selected {
+			nowUnix := time.Now().Unix()
+			rem := a.Period - int(nowUnix%int64(a.Period))
+			right.Objects[0].(*widget.Label).SetText("••• •••")
+			right.Objects[1].(*widget.Label).SetText(fmt.Sprintf("%ds", rem))
+			right.Objects[2].(*widget.ProgressBar).SetValue(float64(rem) / float64(a.Period))
+			return
+		}
 		code, remaining, err := totp.Code(a, time.Now())
 		if err != nil {
 			code = "Error"
@@ -269,7 +328,18 @@ func (c *controller) main() {
 	lock := widget.NewButtonWithIcon("Lock", theme.LoginIcon(), c.lock)
 	settings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), c.settings)
 	toolbar := container.NewHBox(add, importURI, pasteQR, c.copy, c.edit, c.delete, c.export, settings, lock)
-	c.w.SetContent(container.NewBorder(container.NewVBox(widget.NewLabelWithStyle("TOTP Vault", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.search, toolbar), c.status, nil, nil, c.list))
+	toolbarScroll := container.NewHScroll(toolbar)
+	c.w.SetContent(container.NewBorder(container.NewVBox(widget.NewLabelWithStyle("TOTP Vault", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.search, toolbarScroll), c.status, nil, nil, c.list))
+	// Enter copies the selected code (unless typing in a text field).
+	c.w.Canvas().SetOnTypedKey(func(e *fyne.KeyEvent) {
+		if e.Name != fyne.KeyReturn && e.Name != fyne.KeyEnter {
+			return
+		}
+		if _, ok := c.w.Canvas().Focused().(*widget.Entry); ok {
+			return
+		}
+		c.copyCode()
+	})
 	c.filter()
 }
 
@@ -286,8 +356,40 @@ func (c *controller) filter() {
 			c.visible = append(c.visible, i)
 		}
 	}
+	sort.Slice(c.visible, func(i, j int) bool {
+		a, b := c.accounts[c.visible[i]], c.accounts[c.visible[j]]
+		an, bn := strings.ToLower(a.Name), strings.ToLower(b.Name)
+		if an != bn {
+			return an < bn
+		}
+		return strings.ToLower(a.Issuer) < strings.ToLower(b.Issuer)
+	})
 	c.list.Refresh()
-	c.status.SetText(fmt.Sprintf("%d accounts • auto-lock after %s idle", len(c.accounts), c.idle))
+	c.status.SetText(fmt.Sprintf("%d accounts • %s • auto-lock after %s idle", len(c.accounts), c.path, c.idle))
+}
+
+// duplicateError rejects a save where two different accounts share the same
+// identity (name+issuer, case-insensitive) or the same secret. Both cases are
+// almost always an accidental double add/import that later shows the wrong code.
+func duplicateError(accounts []totp.Account) error {
+	seenID := make(map[string]int, len(accounts))
+	seenSecret := make(map[string]int, len(accounts))
+	for i, a := range accounts {
+		id := strings.ToLower(strings.TrimSpace(a.Name)) + "\x00" + strings.ToLower(strings.TrimSpace(a.Issuer))
+		if j, ok := seenID[id]; ok {
+			return fmt.Errorf("duplicate account %q (entries %d and %d share name and issuer)", a.Name, j+1, i+1)
+		}
+		seenID[id] = i
+		// Same key with identical parameters yields identical codes, so it is
+		// almost always a double add/import. Same key with different
+		// digits/period/algorithm is allowed (e.g. migration entries).
+		secretID := a.Secret + "\x00" + strconv.Itoa(a.Digits) + "\x00" + strconv.Itoa(a.Period) + "\x00" + a.Algorithm
+		if j, ok := seenSecret[secretID]; ok {
+			return fmt.Errorf("duplicate secret (entries %d and %d hold the same key with identical settings)", j+1, i+1)
+		}
+		seenSecret[secretID] = i
+	}
+	return nil
 }
 
 func (c *controller) selectAccount(index int) {
@@ -301,6 +403,10 @@ func (c *controller) selectAccount(index int) {
 		} else {
 			b.Enable()
 		}
+	}
+	// Re-render so hide-until-selected masking follows the selection.
+	if c.list != nil {
+		c.list.Refresh()
 	}
 }
 
@@ -333,6 +439,7 @@ func (c *controller) exportAccount() {
 	}
 	d := dialog.NewConfirm("Export TOTP account", "The provisioning URI contains this account’s secret key. Copy it to the clipboard for import in another app? The clipboard will be cleared after 15 seconds if unchanged.", func(ok bool) {
 		defer func() { uri = "" }()
+		defer c.untrack(d)
 		if !ok || c.session != session {
 			return
 		}
@@ -342,11 +449,15 @@ func (c *controller) exportAccount() {
 		c.clipboardUntil = time.Now().Add(15 * time.Second)
 		c.status.SetText("Provisioning URI copied • clipboard clears in 15 seconds")
 	}, c.w)
-	c.track(d)
+	c.track(d, func() { uri = "" })
 }
 
 func (c *controller) save(accounts []totp.Account) bool {
 	if c.session == nil {
+		return false
+	}
+	if err := duplicateError(accounts); err != nil {
+		dialog.ShowError(err, c.w)
 		return false
 	}
 	if err := c.session.Save(accounts); err != nil {
@@ -371,8 +482,12 @@ func (c *controller) accountDialog(index int) {
 	algorithm := widget.NewSelect([]string{"SHA1", "SHA256", "SHA512"}, nil)
 	algorithm.SetSelected("SHA1")
 	title := "Add account"
+	var orig totp.Account
+	isEdit := false
 	if index >= 0 && index < len(c.accounts) {
 		a := c.accounts[index]
+		orig = a
+		isEdit = true
 		title = "Edit account"
 		name.SetText(a.Name)
 		issuer.SetText(a.Issuer)
@@ -389,6 +504,7 @@ func (c *controller) accountDialog(index int) {
 	var d *dialog.FormDialog
 	d = dialog.NewForm(title, "Save", "Cancel", []*widget.FormItem{widget.NewFormItem("Account", name), widget.NewFormItem("Issuer", issuer), widget.NewFormItem("Base32 secret", secret), widget.NewFormItem("Digits", digits), widget.NewFormItem("Period (seconds)", period), widget.NewFormItem("Algorithm", algorithm)}, func(ok bool) {
 		defer secret.SetText("")
+		defer c.untrack(d)
 		if !ok || c.session != session {
 			return
 		}
@@ -405,15 +521,19 @@ func (c *controller) accountDialog(index int) {
 			return
 		}
 		accounts := c.session.Accounts()
-		if index < 0 {
+		if !isEdit {
 			accounts = append(accounts, a)
 		} else {
+			if index < 0 || index >= len(accounts) || accounts[index] != orig {
+				dialog.ShowError(errors.New("account changed meanwhile; reopen and try again"), c.w)
+				return
+			}
 			accounts[index] = a
 		}
 		c.save(accounts)
 	}, c.w)
 	d.Resize(fyne.NewSize(500, 360))
-	c.track(d)
+	c.track(d, func() { secret.SetText("") })
 }
 
 func (c *controller) importDialog() {
@@ -427,6 +547,7 @@ func (c *controller) importDialog() {
 	entry.OnChanged = func(string) { c.touch() }
 	d := dialog.NewForm("Import TOTP URI", "Import", "Cancel", []*widget.FormItem{widget.NewFormItem("URI", entry)}, func(ok bool) {
 		defer entry.SetText("")
+		defer c.untrack(d)
 		if !ok || c.session != session {
 			return
 		}
@@ -439,7 +560,7 @@ func (c *controller) importDialog() {
 		c.save(append(c.session.Accounts(), a))
 	}, c.w)
 	d.Resize(fyne.NewSize(560, 180))
-	c.track(d)
+	c.track(d, func() { entry.SetText("") })
 }
 
 // pasteQRImage reads a QR screenshot from the OS clipboard (image, not text),
@@ -466,7 +587,6 @@ func (c *controller) pasteQRImage() {
 					return
 				}
 				dialog.ShowError(errors.New("no image in clipboard — copy a QR screenshot first (Win+Shift+S)"), c.w)
-				c.filter()
 			})
 			return
 		}
@@ -478,7 +598,6 @@ func (c *controller) pasteQRImage() {
 					return
 				}
 				dialog.ShowError(err, c.w)
-				c.filter()
 			})
 			return
 		}
@@ -490,7 +609,6 @@ func (c *controller) pasteQRImage() {
 					return
 				}
 				dialog.ShowError(fmt.Errorf("QR code is not a valid TOTP URI: %w", err), c.w)
-				c.filter()
 			})
 			return
 		}
@@ -510,16 +628,25 @@ func (c *controller) deleteAccount() {
 		return
 	}
 	session, index := c.session, c.selected
-	d := dialog.NewConfirm("Delete account", "Delete "+c.accounts[index].Name+"? Make sure you have another copy of its TOTP key.", func(ok bool) {
+	if index < 0 || index >= len(c.accounts) {
+		return
+	}
+	orig := c.accounts[index]
+	d := dialog.NewConfirm("Delete account", "Delete "+orig.Name+"? Make sure you have another copy of its TOTP key.", func(ok bool) {
+		defer c.untrack(d)
 		if !ok || c.session != session {
 			return
 		}
 		c.touch()
 		accounts := c.session.Accounts()
+		if index < 0 || index >= len(accounts) || accounts[index] != orig {
+			dialog.ShowError(errors.New("account changed meanwhile; reopen and try again"), c.w)
+			return
+		}
 		accounts = append(accounts[:index], accounts[index+1:]...)
 		c.save(accounts)
 	}, c.w)
-	c.track(d)
+	c.track(d, nil)
 }
 
 func (c *controller) settings() {
@@ -530,12 +657,15 @@ func (c *controller) settings() {
 	session := c.session
 	minutes := widget.NewSelect([]string{"1", "2", "5", "10", "15"}, func(string) { c.touch() })
 	minutes.SetSelected(strconv.Itoa(int(c.idle / time.Minute)))
+	hide := widget.NewCheck("Hide codes until selected", func(bool) { c.touch() })
+	hide.SetChecked(c.hideCodes)
 	password, confirm := widget.NewPasswordEntry(), widget.NewPasswordEntry()
 	password.OnChanged = func(string) { c.touch() }
 	confirm.OnChanged = func(string) { c.touch() }
-	d := dialog.NewForm("Settings", "Save", "Cancel", []*widget.FormItem{widget.NewFormItem("Auto-lock idle minutes", minutes), widget.NewFormItem("New master password (optional)", password), widget.NewFormItem("Repeat new password", confirm)}, func(ok bool) {
+	d := dialog.NewForm("Settings", "Save", "Cancel", []*widget.FormItem{widget.NewFormItem("Auto-lock idle minutes", minutes), widget.NewFormItem("Privacy", hide), widget.NewFormItem("New master password (optional)", password), widget.NewFormItem("Repeat new password", confirm)}, func(ok bool) {
 		defer password.SetText("")
 		defer confirm.SetText("")
+		defer c.untrack(d)
 		if !ok || c.session != session {
 			return
 		}
@@ -550,10 +680,15 @@ func (c *controller) settings() {
 				return
 			}
 		}
-		n, _ := strconv.Atoi(minutes.Selected)
+		n, err := strconv.Atoi(minutes.Selected)
+		if err != nil || n <= 0 {
+			dialog.ShowError(errors.New("invalid idle minutes"), c.w)
+			return
+		}
 		c.idle = time.Duration(n) * time.Minute
+		c.hideCodes = hide.Checked
 		c.filter()
 	}, c.w)
 	d.Resize(fyne.NewSize(600, 260))
-	c.track(d)
+	c.track(d, func() { password.SetText(""); confirm.SetText("") })
 }

@@ -33,17 +33,19 @@ func DecodeBytes(data []byte) (string, error) {
 	if len(data) > maxImageBytes {
 		return "", errors.New("image exceeds 5 MiB limit")
 	}
-	img, _, err := image.Decode(bytes.NewReader(data))
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return "", errors.New("clipboard does not hold a readable PNG/JPEG image")
 	}
-	b := img.Bounds()
-	dx, dy := b.Dx(), b.Dy()
-	if dx <= 0 || dy <= 0 || dx > maxDimension || dy > maxDimension {
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxDimension || cfg.Height > maxDimension {
 		return "", errors.New("image dimensions out of range")
 	}
-	if int64(dx)*int64(dy) > maxPixels {
+	if int64(cfg.Width)*int64(cfg.Height) > maxPixels {
 		return "", errors.New("image has too many pixels")
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return "", errors.New("clipboard does not hold a readable PNG/JPEG image")
 	}
 	res, err := qr.Decode(img)
 	if err != nil {
