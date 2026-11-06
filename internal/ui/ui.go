@@ -63,7 +63,7 @@ func Run(path string) {
 	c.w.SetCloseIntercept(func() { c.lock(); a.Quit() })
 	c.login()
 	go func() {
-		ticker := time.NewTicker(250 * time.Millisecond)
+		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {

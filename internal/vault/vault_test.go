@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spapas/totpvault/internal/totp"
@@ -125,5 +126,63 @@ func TestNonceAndFailedSave(t *testing.T) {
 	still, _ := os.ReadFile(path)
 	if !bytes.Equal(after, still) {
 		t.Fatal("failed save changed disk")
+	}
+}
+
+func TestLimitsAndPasswords(t *testing.T) {
+	if err := CheckPassword("short"); err == nil {
+		t.Fatal("short password accepted")
+	}
+	if err := CheckPassword(strings.Repeat("a", 11)); err == nil {
+		t.Fatal("11-rune password accepted")
+	}
+	if err := CheckPassword("123456789012"); err != nil {
+		t.Fatalf("12-rune password rejected: %v", err)
+	}
+	if err := CheckPassword(strings.Repeat("x", 1025)); err == nil {
+		t.Fatal("oversize password accepted")
+	}
+	path := filepath.Join(t.TempDir(), "vault.dat")
+	s, err := Create(path, testPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Lock()
+	if _, err = Unlock(path, strings.Repeat("y", 1025)); err == nil {
+		t.Fatal("oversize unlock password accepted")
+	}
+	if err = s.ChangePassword("short"); err == nil {
+		t.Fatal("short rotation password accepted")
+	}
+	many := make([]totp.Account, 10001)
+	for i := range many {
+		many[i] = totp.Account{Name: "a", Secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}
+	}
+	if err = s.Save(many); err == nil {
+		t.Fatal("over-limit accounts saved")
+	}
+	bigPath := filepath.Join(t.TempDir(), "big.dat")
+	if err = os.WriteFile(bigPath, make([]byte, (8<<20)+1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Unlock(bigPath, testPassword); err == nil {
+		t.Fatal("oversize file unlocked")
+	}
+	gonePath := filepath.Join(t.TempDir(), "gone.dat")
+	g, err := Create(gonePath, testPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Lock()
+	if err = os.Remove(gonePath); err != nil {
+		t.Fatal(err)
+	}
+	if err = g.Save(nil); !errors.Is(err, ErrChanged) {
+		t.Fatalf("save after delete: %v", err)
+	}
+	s.Lock()
+	s.Lock()
+	if err = s.Save(nil); !errors.Is(err, ErrLocked) {
+		t.Fatalf("save after double lock: %v", err)
 	}
 }

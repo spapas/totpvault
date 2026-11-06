@@ -2,6 +2,7 @@ package totp
 
 import (
 	"encoding/base32"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,5 +87,47 @@ func TestEncodedIssuerSeparator(t *testing.T) {
 		if !tc.wantErr && (got.Issuer != tc.wantIssuer || got.Name != tc.wantName) {
 			t.Fatalf("ParseURI(%q) = issuer %q, name %q; want issuer %q, name %q", tc.raw, got.Issuer, got.Name, tc.wantIssuer, tc.wantName)
 		}
+	}
+}
+
+func TestValidationEdges(t *testing.T) {
+	secret := "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+	longName := strings.Repeat("a", 257)
+	for _, raw := range []string{
+		"otpauth://totp/x",
+		"otpauth://totp/x?secret=" + secret + "&digits=5",
+		"otpauth://totp/x?secret=" + secret + "&digits=7",
+		"otpauth://totp/x?secret=" + secret + "&period=301",
+		"otpauth://totp/x?secret=" + secret + "&period=-1",
+		"otpauth://user@totp/x?secret=" + secret,
+		"otpauth://totp/x?secret=" + secret + "#frag",
+		"otpauth://totp/x?secret=!!!!",
+		"otpauth://totp/x?secret=JBSWY3DP",
+	} {
+		if _, err := ParseURI(raw); err == nil {
+			t.Fatalf("accepted %s", raw)
+		}
+	}
+	for _, a := range []Account{
+		{Name: "", Secret: secret},
+		{Name: longName, Secret: secret},
+		{Issuer: longName, Name: "x", Secret: secret},
+		{Name: "x", Secret: strings.Repeat(secret, 33)},
+	} {
+		if _, err := Normalize(a); err == nil {
+			t.Fatalf("normalized %+v", a)
+		}
+	}
+	if _, err := Normalize(Account{Name: "x", Secret: secret, Algorithm: "sha256"}); err != nil {
+		t.Fatalf("lowercase algorithm rejected: %v", err)
+	}
+	if _, _, err := Code(Account{Name: "x", Secret: secret}, time.Unix(-1, 0)); err == nil {
+		t.Fatal("pre-epoch clock accepted")
+	}
+	if _, err := ProvisioningURI(Account{Name: "", Secret: secret}); err == nil {
+		t.Fatal("empty name formatted")
+	}
+	if _, err := ProvisioningURI(Account{Name: "x", Secret: "bad"}); err == nil {
+		t.Fatal("bad secret formatted")
 	}
 }

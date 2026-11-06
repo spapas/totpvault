@@ -119,7 +119,7 @@ controller{app, w, path, session *vault.Session, accounts, visible []int,
 ### 5.1 Screens
 
 - `Run(path)` — `app.NewWithID`, theme, 720×520 window, close-intercept → `lock()+Quit`,
-  starts 250 ms goroutine (`fyne.Do(c.tick)`), `ShowAndRun`, on exit `close(stopped)` +
+  starts 500 ms goroutine (`fyne.Do(c.tick)`), `ShowAndRun`, on exit `close(stopped)` +
   `fyne.DoAndWait` final lock (drains a KDF completion queued just before close).
 - `login()` — `os.Stat(path)` decides create vs unlock (dir-as-vault and
   unreadable path show Retry/Quit instead of a dead end). Password entries
@@ -151,7 +151,7 @@ controller{app, w, path, session *vault.Session, accounts, visible []int,
   The same closures are registered in `clearOnLock` and run by `lock()`, so
   auto-lock while a dialog is open still wipes entries.
 - **`touch()` discipline:** only explicit actions (typing in form/search, select,
-  button handlers, show-secret/about) call `touch()` (monotonic + wall). The 250 ms `tick` and mouse movement never do.
+  button handlers, show-secret/about) call `touch()` (monotonic + wall). The 500 ms `tick` and mouse movement never do.
 - **`tick()` (UI thread via `fyne.Do`):** expire clipboard (clear only if OS clipboard
   still equals copied code or URI) → if `session==nil` return → if `now-lastActivity >= idle`
   **or** wall-clock elapsed `>= idle` (suspend backstop) then `lock()` → else `list.Refresh()`.
@@ -197,9 +197,9 @@ plus reject empty / non-image / QR-less / oversize inputs.
 - **No network:** `go.mod` = Fyne + `gofrs/flock` + `x/crypto` + `golang.design/x/clipboard`
   (OS image clipboard, Cgo-free) + `piglig/go-qr/v2` (offline QR decode, zero runtime
   deps) only. Adding any dialing dependency violates the threat model.
-- **Testing:** `totp_test.go` (18 RFC 6238 vectors, countdown, URI accept/reject),
+- **Testing:** `totp_test.go` (18 RFC 6238 vectors, countdown, URI accept/reject, validation edges),
   `vault_test.go` (round-trip, no-plaintext-on-disk, wrong-pw, O_EXCL, tamper/truncate,
-  nonce-freshness, rotation, stale-write), `qrimg_test.go` (QR round-trip from RFC
+  nonce-freshness, rotation, stale-write, limits, password policy), `qrimg_test.go` (QR round-trip from RFC
   secret, non-TOTP QR still decodes but `ParseURI` rejects it, empty/non-image/
   QR-less/oversize rejection), `ui_test.go` (Fyne test driver:
   filter, copy, clipboard-expiry, auto-lock). See `docs/VALIDATION.md`.

@@ -12,6 +12,8 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 - Optional `Hide codes until selected` in Settings (select-to-reveal, skips HMAC for hidden rows).
 - Enter copies the selected code; countdown goes bold under 6 seconds.
 - About dialog with vault path, backup reminder, clock note and shortcuts.
+- `Show secret` toggle in Add/Edit; delete confirm shows issuer and permanent-loss warning.
+- Startup failures also print to stderr with non-zero exit (headless-safe).
 
 ### Fixed
 
@@ -22,6 +24,8 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 - Failed QR pastes no longer reset selection; invalid idle minutes rejected.
 - Deleted-vault save maps to `ErrChanged`; `ChangePassword` releases old key slice.
 - Unreadable vault path shows Retry/Quit; vault dir tightened to `0700` on POSIX.
+- Ticker relaxed to 500 ms (same UX, less HMAC churn on large vaults).
+- New edge tests: TOTP validation branches, vault size/account limits and password policy.
 
 ## [0.2.1] - 2026-10-15
 

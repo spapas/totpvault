@@ -14,7 +14,7 @@ or `internal/ui`. Security properties here are load-bearing, not style.
 | `internal/totp/totp.go` | RFC 6238 `Code()`, `Normalize()`, `ParseURI()` — pure, no I/O |
 | `internal/qrimg/qrimg.go` | Offline QR decode `DecodeBytes()` (clipboard PNG/JPEG → URI text) — pure, no I/O, no clipboard calls; caller must still run `totp.ParseURI` |
 | `internal/vault/vault.go` | Argon2id + XChaCha20-Poly1305 file format, `Create/Unlock/Save/ChangePassword`, atomic replace, fingerprint anti-stale-write |
-| `internal/ui/ui.go` + `theme.go` | Fyne controller: login → main list → dialogs, 250 ms tick (codes, clipboard expiry, auto-lock), `Paste QR` via OS image clipboard + `qrimg` + `ParseURI` |
+| `internal/ui/ui.go` + `theme.go` | Fyne controller: login → main list → dialogs, 500 ms tick (codes, clipboard expiry, auto-lock), `Paste QR` via OS image clipboard + `qrimg` + `ParseURI` |
 | `docs/VALIDATION.md` | What was manually validated on 2026-10-08 |
 | `scripts/package_release.py` | CI packaging: validates `VERSION` + `MZ`/`ELF` magic, zips/tarballs binaries + docs, writes `SHA256SUMS` |
 | `.github/workflows/build.yml` | Matrix build (ubuntu-24.04, windows-latest): test → vet → govulncheck → build → draft/publish release |
