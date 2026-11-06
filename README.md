@@ -2,6 +2,11 @@
 
 A small offline authenticator for Windows and Linux, written in Go with Fyne.
 
+## Screenshots
+
+![Main window with accounts, two-row toolbar and live codes](docs/screenshots/main.png)
+![Unlock screen with master password prompt](docs/screenshots/login.png)
+
 ## Features
 
 - Create and unlock an encrypted vault with a master password.
