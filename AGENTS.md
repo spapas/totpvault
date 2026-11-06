@@ -78,8 +78,8 @@ Native runs use the real desktop driver.
    `c.session != session` (locked meanwhile); edit/delete also verify the
    account index still holds the same account. Activity = form/search/selection/button
    only; countdown/mouse-move must NOT reset `lastActivity`/`lastWallUnix`. Clipboard clears after
-   15 s only if content still equals copied code or URI. Settings (idle 1–15 min) are
-   per-session, default 5 min.
+   15 s only if content still equals copied code or URI. Settings (idle 1–15 min, hide-codes) are
+   per-session, defaults 5 min / visible. `filter()` sorts alphabetically; `tick()` also checks wall-clock for suspend.
 6. **Keep it offline.** No new dependencies that dial network, no auto-update,
    no camera capture, no bulk export/import. Pinned offline exceptions: `golang.design/x/clipboard`
    (OS image clipboard, Cgo-free) + `piglig/go-qr/v2` (pure decode, zero runtime deps).

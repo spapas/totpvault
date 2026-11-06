@@ -105,52 +105,63 @@ Session.Lock() ── clear(key), zero accounts, nil both
 - Errors: `ErrAuthentication` (wrong pw or tamper — deliberately ambiguous),
   `ErrChanged`, `ErrLocked`, plus descriptive format/validation errors.
 
-## 5. UI — `internal/ui/ui.go` (559 lines) + `theme.go` (55 lines)
+## 5. UI — `internal/ui/ui.go` (720 lines) + `theme.go` (55 lines)
 
 Single `controller` struct owns everything per window:
 
 ```
 controller{app, w, path, session *vault.Session, accounts, visible []int,
   selected, list, search, edit/delete/copy/export buttons, status,
-  lastActivity, idle (default 5m), clipboard+clipboardUntil, dialogs, stopped}
+  lastActivity+lastWallUnix, idle (default 5m), hideCodes,
+  clipboard+clipboardUntil, dialogs+clearOnLock, stopped}
 ```
 
 ### 5.1 Screens
 
 - `Run(path)` — `app.NewWithID`, theme, 720×520 window, close-intercept → `lock()+Quit`,
-  starts 250 ms goroutine (`fyne.Do(c.tick)`), `ShowAndRun`, on exit `close(stopped)` + `Lock()`.
-- `login()` — `os.Stat(path)` decides create vs unlock. Password entries
+  starts 250 ms goroutine (`fyne.Do(c.tick)`), `ShowAndRun`, on exit `close(stopped)` +
+  `fyne.DoAndWait` final lock (drains a KDF completion queued just before close).
+- `login()` — `os.Stat(path)` decides create vs unlock (dir-as-vault and
+  unreadable path show Retry/Quit instead of a dead end). Password entries
   (`NewPasswordEntry`), optional confirm + 12-char hint on create. Submit disables
   form, clears entries, shows "Deriving encryption key…", derives in background goroutine
   (Argon2id ~blocks), then `fyne.Do` back to UI thread: error → re-enable + message;
   success → `c.session/c.accounts=touch()+main()`. `stopped` checked so quit-during-KDF
   locks the stray session.
 - `main()` — search entry + toolbar (Add / Import URI / Paste QR / Copy / Edit / Delete / Export /
-  Settings / Lock) + `widget.List`. List rows: left (name bold + issuer), right
-  (monospace code `123 456`/`1234 5678`, `Ns` countdown, progress bar `remaining/period`).
-  `OnSelected/OnUnselected` → `selectAccount` (enables/disables Copy/Edit/Delete/Export).
-- Dialogs: `accountDialog` (Add/Edit with name/issuer/secret/digits/period/algorithm,
-  validates via `Normalize`), `importDialog` (password entry for URI, `ParseURI`),
+  Settings / About / Lock, inside `HScroll`) + `widget.List`. List rows: left (name bold + issuer), right
+  (monospace code or `••• •••` when hide-until-selected, `Ns` countdown bold at ≤5s, progress bar).
+  Enter copies the selected code (unless typing in an entry).
+  `OnSelected/OnUnselected` → `selectAccount` (enables/disables Copy/Edit/Delete/Export + refresh for masking).
+- Dialogs: `accountDialog` (Add/Edit with name/issuer/secret+show-toggle/digits/period/algorithm,
+  validates via `Normalize`; edit verifies the index still holds the same account), `importDialog` (password entry for URI, `ParseURI`),
   `exportAccount` (confirmation before copying one account's secret-bearing URI;
   clipboard expires after 15 seconds if unchanged),
-  `deleteAccount` (confirm), `settings` (idle 1/2/5/10/15 min + optional password change).
+  `deleteAccount` (name + issuer + permanent-loss warning; verifies index identity), `settings` (idle 1/2/5/10/15 min + hide-codes checkbox + optional password change),
+  `aboutDialog` (vault path, backup reminder, clock note, shortcuts).
 
 ### 5.2 Invariants agents must keep
 
 - **All writes via `c.save(accounts)`** → `session.Save` → `c.accounts = session.Accounts()` → `filter()`.
 - **Stale-session guard:** every dialog captures `session := c.session` at open and
-  aborts on confirm if `c.session != session` (user locked meanwhile).
+  aborts on confirm if `c.session != session` (user locked meanwhile); edit/delete
+  also verify the index still holds the same account. Untracked-after-dismiss via `untrack()`; `lock()` hides the rest.
 - **Secrets cleared:** `secret.SetText("")` / `entry.SetText("")` / `password.SetText("")`
   deferred after each dialog; login clears both password fields before KDF.
+  The same closures are registered in `clearOnLock` and run by `lock()`, so
+  auto-lock while a dialog is open still wipes entries.
 - **`touch()` discipline:** only explicit actions (typing in form/search, select,
-  button handlers) call `touch()`. The 250 ms `tick` and mouse movement never do.
+  button handlers, show-secret/about) call `touch()` (monotonic + wall). The 250 ms `tick` and mouse movement never do.
 - **`tick()` (UI thread via `fyne.Do`):** expire clipboard (clear only if OS clipboard
   still equals copied code or URI) → if `session==nil` return → if `now-lastActivity >= idle`
-  then `lock()` → else `list.Refresh()` (recomputes codes/countdowns).
-- **`lock()`:** hide all dialogs, `session.Lock(); session=nil`, zero `accounts`,
+  **or** wall-clock elapsed `>= idle` (suspend backstop) then `lock()` → else `list.Refresh()`.
+- **`lock()`:** run `clearOnLock`, hide all dialogs, `session.Lock(); session=nil`, zero `accounts`,
   reset selection/list handle, `clearClipboard()`, back to `login()`.
 - **`filter()`:** unselect, rebuild `visible` by case-insensitive name+issuer substring,
-  refresh list, status `"%d accounts • auto-lock after %s idle"`.
+  sort alphabetically (name, then issuer), refresh list, status `"N accounts • path • auto-lock …"`
+  or `"showing X of N • …"` while searching.
+- **`save()`:** `duplicateError()` rejects same name+issuer or same secret-with-identical-settings
+  before `session.Save`; `ErrChanged`/validation surface via `dialog.ShowError`.
 - **`pasteQRImage()`:** `touch()` + stale-session capture, `clipboard.Init()`
   (OS image clipboard — Fyne's own clipboard is text-only), status
   "Reading QR image from clipboard…", then background goroutine with 5 s timeout:
@@ -166,7 +177,8 @@ controller{app, w, path, session *vault.Session, accounts, visible []int,
 ## 6. QR clipboard import — `internal/qrimg/qrimg.go`
 
 Pure offline bridge between image bytes and URI text: `DecodeBytes(data)` enforces
-size limits, `image.Decode` (PNG/JPEG registered only), dimension/pixel guards, then
+size limits, `image.DecodeConfig` header pre-check (dimensions/pixels) before the full
+`image.Decode` (PNG/JPEG registered only), then
 `qr.Decode(img)` (single symbol; `piglig/go-qr/v2`, zero runtime deps) and trims +
 length-checks the payload. It deliberately does NOT call `totp.ParseURI` — the UI
 layer does, so non-TOTP QR content (URLs, Wi-Fi, contacts) fails closed at the same

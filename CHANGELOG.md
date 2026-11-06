@@ -5,6 +5,24 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+### Added
+
+- Alphabetical account sorting; search status shows `showing X of Y`.
+- Duplicate protection on save (same name+issuer, or same secret with identical settings).
+- Optional `Hide codes until selected` in Settings (select-to-reveal, skips HMAC for hidden rows).
+- Enter copies the selected code; countdown goes bold under 6 seconds.
+- About dialog with vault path, backup reminder, clock note and shortcuts.
+
+### Fixed
+
+- Stale-index guards on edit/delete (abort instead of wrong overwrite/panic).
+- Lock wipes dialog secrets via `clearOnLock` and untracks dismissed dialogs.
+- QR decode checks dimensions via `DecodeConfig` before full decode.
+- Auto-lock wall-clock backstop for sleep/hibernate; shutdown drains queued KDF work.
+- Failed QR pastes no longer reset selection; invalid idle minutes rejected.
+- Deleted-vault save maps to `ErrChanged`; `ChangePassword` releases old key slice.
+- Unreadable vault path shows Retry/Quit; vault dir tightened to `0700` on POSIX.
+
 ## [0.2.1] - 2026-10-15
 
 ### Added

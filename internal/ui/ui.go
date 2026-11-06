@@ -298,7 +298,9 @@ func (c *controller) main() {
 			nowUnix := time.Now().Unix()
 			rem := a.Period - int(nowUnix%int64(a.Period))
 			right.Objects[0].(*widget.Label).SetText("••• •••")
-			right.Objects[1].(*widget.Label).SetText(fmt.Sprintf("%ds", rem))
+			countLabel := right.Objects[1].(*widget.Label)
+			countLabel.TextStyle = fyne.TextStyle{Bold: rem <= 5}
+			countLabel.SetText(fmt.Sprintf("%ds", rem))
 			right.Objects[2].(*widget.ProgressBar).SetValue(float64(rem) / float64(a.Period))
 			return
 		}
@@ -312,7 +314,9 @@ func (c *controller) main() {
 			code = code[:4] + " " + code[4:]
 		}
 		right.Objects[0].(*widget.Label).SetText(code)
-		right.Objects[1].(*widget.Label).SetText(fmt.Sprintf("%ds", remaining))
+		countLabel := right.Objects[1].(*widget.Label)
+		countLabel.TextStyle = fyne.TextStyle{Bold: err == nil && remaining <= 5}
+		countLabel.SetText(fmt.Sprintf("%ds", remaining))
 		right.Objects[2].(*widget.ProgressBar).SetValue(float64(remaining) / float64(a.Period))
 	})
 	c.list.OnSelected = func(id widget.ListItemID) {
@@ -327,7 +331,8 @@ func (c *controller) main() {
 	pasteQR := widget.NewButton("Paste QR", c.pasteQRImage)
 	lock := widget.NewButtonWithIcon("Lock", theme.LoginIcon(), c.lock)
 	settings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), c.settings)
-	toolbar := container.NewHBox(add, importURI, pasteQR, c.copy, c.edit, c.delete, c.export, settings, lock)
+	about := widget.NewButton("About", c.aboutDialog)
+	toolbar := container.NewHBox(add, importURI, pasteQR, c.copy, c.edit, c.delete, c.export, settings, about, lock)
 	toolbarScroll := container.NewHScroll(toolbar)
 	c.w.SetContent(container.NewBorder(container.NewVBox(widget.NewLabelWithStyle("TOTP Vault", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.search, toolbarScroll), c.status, nil, nil, c.list))
 	// Enter copies the selected code (unless typing in a text field).
@@ -365,7 +370,11 @@ func (c *controller) filter() {
 		return strings.ToLower(a.Issuer) < strings.ToLower(b.Issuer)
 	})
 	c.list.Refresh()
-	c.status.SetText(fmt.Sprintf("%d accounts • %s • auto-lock after %s idle", len(c.accounts), c.path, c.idle))
+	if strings.TrimSpace(q) == "" {
+		c.status.SetText(fmt.Sprintf("%d accounts • %s • auto-lock after %s idle", len(c.accounts), c.path, c.idle))
+	} else {
+		c.status.SetText(fmt.Sprintf("showing %d of %d • %s • auto-lock after %s idle", len(c.visible), len(c.accounts), c.path, c.idle))
+	}
 }
 
 // duplicateError rejects a save where two different accounts share the same
@@ -501,8 +510,9 @@ func (c *controller) accountDialog(index int) {
 	}
 	digits.OnChanged = func(string) { c.touch() }
 	algorithm.OnChanged = func(string) { c.touch() }
+	show := widget.NewCheck("Show secret", func(on bool) { c.touch(); secret.Password = !on; secret.Refresh() })
 	var d *dialog.FormDialog
-	d = dialog.NewForm(title, "Save", "Cancel", []*widget.FormItem{widget.NewFormItem("Account", name), widget.NewFormItem("Issuer", issuer), widget.NewFormItem("Base32 secret", secret), widget.NewFormItem("Digits", digits), widget.NewFormItem("Period (seconds)", period), widget.NewFormItem("Algorithm", algorithm)}, func(ok bool) {
+	d = dialog.NewForm(title, "Save", "Cancel", []*widget.FormItem{widget.NewFormItem("Account", name), widget.NewFormItem("Issuer", issuer), widget.NewFormItem("Base32 secret", secret), widget.NewFormItem("", show), widget.NewFormItem("Digits", digits), widget.NewFormItem("Period (seconds)", period), widget.NewFormItem("Algorithm", algorithm)}, func(ok bool) {
 		defer secret.SetText("")
 		defer c.untrack(d)
 		if !ok || c.session != session {
@@ -632,7 +642,11 @@ func (c *controller) deleteAccount() {
 		return
 	}
 	orig := c.accounts[index]
-	d := dialog.NewConfirm("Delete account", "Delete "+orig.Name+"? Make sure you have another copy of its TOTP key.", func(ok bool) {
+	name := orig.Name
+	if orig.Issuer != "" {
+		name += " (" + orig.Issuer + ")"
+	}
+	d := dialog.NewConfirm("Delete account", "Delete "+name+"? Its secret is removed permanently and codes stop working. Make sure you have a backup or another copy of its TOTP key.", func(ok bool) {
 		defer c.untrack(d)
 		if !ok || c.session != session {
 			return
@@ -689,6 +703,18 @@ func (c *controller) settings() {
 		c.hideCodes = hide.Checked
 		c.filter()
 	}, c.w)
-	d.Resize(fyne.NewSize(600, 260))
+	d.Resize(fyne.NewSize(600, 280))
 	c.track(d, func() { password.SetText(""); confirm.SetText("") })
+}
+
+func (c *controller) aboutDialog() {
+	c.touch()
+	msg := "Offline TOTP authenticator.\n\n" +
+		"Vault: " + c.path + "\n" +
+		"Back up vault.dat to a safe place — a forgotten master password cannot be recovered.\n\n" +
+		"If all codes fail, check the system clock.\n\n" +
+		"Enter copies the selected code. Hide codes until selected in Settings."
+	d := dialog.NewInformation("About TOTP Vault", msg, c.w)
+	d.SetOnClosed(func() { c.untrack(d) })
+	c.track(d, nil)
 }
