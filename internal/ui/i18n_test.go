@@ -1,10 +1,9 @@
 package ui
 
 import (
-	"os"
+	_ "embed"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,20 +15,16 @@ import (
 	"github.com/spapas/totpvault/internal/vault"
 )
 
+//go:embed ui.go
+var uiSource string
+
 // Every message ID referenced by the UI must exist in the source table,
-// otherwise users see raw keys like "btn.import_uri".
+// otherwise users see raw keys like "btn.import_uri". The UI source is
+// embedded at compile time so the check works with -trimpath builds too.
 func TestAllUIKeysTranslated(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate test file")
-	}
-	src, err := os.ReadFile(filepath.Join(filepath.Dir(file), "ui.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	re := regexp.MustCompile(`"((?:app|btn|login|main|status|export|acct|import|qr|delete|settings|about|dup|err)\.[a-z0-9_]+)"`)
 	seen := map[string]bool{}
-	for _, m := range re.FindAllSubmatch(src, -1) {
+	for _, m := range re.FindAllStringSubmatch(uiSource, -1) {
 		key := string(m[1])
 		if seen[key] {
 			continue
