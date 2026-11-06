@@ -1,16 +1,48 @@
 package ui
 
 import (
+	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
+	"github.com/spapas/totpvault/internal/i18n"
 	"github.com/spapas/totpvault/internal/totp"
 	"github.com/spapas/totpvault/internal/vault"
 )
+
+// Every message ID referenced by the UI must exist in the source table,
+// otherwise users see raw keys like "btn.import_uri".
+func TestAllUIKeysTranslated(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate test file")
+	}
+	src, err := os.ReadFile(filepath.Join(filepath.Dir(file), "ui.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := regexp.MustCompile(`"((?:app|btn|login|main|status|export|acct|import|qr|delete|settings|about|dup|err)\.[a-z0-9_]+)"`)
+	seen := map[string]bool{}
+	for _, m := range re.FindAllSubmatch(src, -1) {
+		key := string(m[1])
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if i18n.Get("en", key) == key {
+			t.Fatalf("UI key %q missing from English table", key)
+		}
+	}
+	if len(seen) == 0 {
+		t.Fatal("no UI keys found; regex broken")
+	}
+}
 
 // Switching language rebuilds the visible strings without touching the vault.
 func TestLanguageSwitch(t *testing.T) {

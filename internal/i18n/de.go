@@ -18,6 +18,8 @@ var deStrings = map[string]string{
 	"btn.save":     "Speichern",
 	"btn.cancel":   "Abbrechen",
 	"btn.import":   "Importieren",
+	"btn.import_uri": "URI importieren",
+	"btn.paste_qr": "QR einfügen",
 
 	"login.cannot_read": "Tresor kann nicht gelesen werden",
 	"login.is_dir":      "Tresorpfad ist ein Verzeichnis",

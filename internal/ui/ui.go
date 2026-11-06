@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"image/color"
@@ -24,6 +25,11 @@ import (
 	"github.com/spapas/totpvault/internal/vault"
 	"golang.design/x/clipboard"
 )
+
+//go:embed icon.svg
+var appIconSVG []byte
+
+func appIcon() fyne.Resource { return fyne.NewStaticResource("icon.svg", appIconSVG) }
 
 type controller struct {
 	app                        fyne.App
@@ -53,6 +59,7 @@ func ShowError(err error) {
 	lang := i18n.Detect()
 	a := app.New()
 	a.Settings().SetTheme(newAppTheme())
+	a.SetIcon(appIcon())
 	w := a.NewWindow(i18n.Get(lang, "app.title"))
 	w.SetContent(container.NewVBox(widget.NewLabelWithStyle(i18n.Get(lang, "err.start_title"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewLabel(err.Error()), widget.NewButton(i18n.Get(lang, "btn.close"), a.Quit)))
 	w.ShowAndRun()
@@ -61,6 +68,7 @@ func ShowError(err error) {
 func Run(path string) {
 	a := app.NewWithID("io.github.spapas.totpvault")
 	a.Settings().SetTheme(newAppTheme())
+	a.SetIcon(appIcon())
 	lang := i18n.Detect()
 	if v := a.Preferences().StringWithFallback("language", ""); v != "" {
 		if t := i18n.Normalize(v); t != "" {
@@ -68,6 +76,7 @@ func Run(path string) {
 		}
 	}
 	c := &controller{app: a, w: a.NewWindow(i18n.Get(lang, "app.title")), path: path, lang: lang, idle: 5 * time.Minute, selected: -1, stopped: make(chan struct{})}
+	c.w.SetIcon(appIcon())
 	c.w.Resize(fyne.NewSize(720, 520))
 	c.w.SetCloseIntercept(func() { c.lock(); a.Quit() })
 	c.login()
@@ -311,7 +320,7 @@ func (c *controller) main() {
 	c.copy = widget.NewButtonWithIcon(c.t("btn.copy"), theme.ContentCopyIcon(), c.copyCode)
 	c.edit = widget.NewButtonWithIcon(c.t("btn.edit"), theme.DocumentCreateIcon(), func() { c.touch(); c.accountDialog(c.selected) })
 	c.delete = widget.NewButtonWithIcon(c.t("btn.delete"), theme.DeleteIcon(), c.deleteAccount)
-	c.export = widget.NewButton(c.t("btn.export"), c.exportAccount)
+	c.export = widget.NewButtonWithIcon(c.t("btn.export"), theme.UploadIcon(), c.exportAccount)
 	c.selectAccount(-1)
 	c.list = widget.NewList(func() int { return len(c.visible) }, func() fyne.CanvasObject {
 		code := widget.NewLabelWithStyle("000 000", fyne.TextAlignTrailing, fyne.TextStyle{Monospace: true, Bold: true})
@@ -364,14 +373,14 @@ func (c *controller) main() {
 	}
 	c.list.OnUnselected = func(widget.ListItemID) { c.selectAccount(-1) }
 	add := widget.NewButtonWithIcon(c.t("btn.add"), theme.ContentAddIcon(), func() { c.touch(); c.accountDialog(-1) })
-	importURI := widget.NewButton(c.t("btn.import_uri"), c.importDialog)
-	pasteQR := widget.NewButton(c.t("btn.paste_qr"), c.pasteQRImage)
-	lock := widget.NewButtonWithIcon(c.t("btn.lock"), theme.LoginIcon(), c.lock)
+	importURI := widget.NewButtonWithIcon(c.t("btn.import_uri"), theme.DownloadIcon(), c.importDialog)
+	pasteQR := widget.NewButtonWithIcon(c.t("btn.paste_qr"), theme.ContentPasteIcon(), c.pasteQRImage)
+	lock := widget.NewButtonWithIcon(c.t("btn.lock"), theme.LogoutIcon(), c.lock)
 	settings := widget.NewButtonWithIcon(c.t("btn.settings"), theme.SettingsIcon(), c.settings)
-	about := widget.NewButton(c.t("btn.about"), c.aboutDialog)
-	toolbar := container.NewHBox(add, importURI, pasteQR, c.copy, c.edit, c.delete, c.export, settings, about, lock)
-	toolbarScroll := container.NewHScroll(toolbar)
-	c.w.SetContent(container.NewBorder(container.NewVBox(widget.NewLabelWithStyle(c.t("main.title"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.search, toolbarScroll), c.status, nil, nil, c.list))
+	about := widget.NewButtonWithIcon(c.t("btn.about"), theme.InfoIcon(), c.aboutDialog)
+	row1 := container.NewHBox(add, c.copy, c.edit, c.delete, c.export)
+	row2 := container.NewHBox(importURI, pasteQR, settings, about, lock)
+	c.w.SetContent(container.NewBorder(container.NewVBox(widget.NewLabelWithStyle(c.t("main.title"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.search, row1, row2), c.status, nil, nil, c.list))
 	// Enter copies the selected code (unless typing in a text field).
 	c.w.Canvas().SetOnTypedKey(func(e *fyne.KeyEvent) {
 		if e.Name != fyne.KeyReturn && e.Name != fyne.KeyEnter {

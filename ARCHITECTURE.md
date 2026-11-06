@@ -127,6 +127,7 @@ the tag (non-secret) and rebuilds the current screen. `totp`/`vault`/`qrimg`
 keep returning English errors untouched — translation never alters validation.
 
 - `Run(path)` — `app.NewWithID`, theme, 720×520 window, close-intercept → `lock()+Quit`,
+  `a.SetIcon` + `w.SetIcon` use the embedded `icon.svg` padlock (teal rounded square),
   starts 500 ms goroutine (`fyne.Do(c.tick)`), `ShowAndRun`, on exit `close(stopped)` +
   `fyne.DoAndWait` final lock (drains a KDF completion queued just before close).
 - `login()` — `os.Stat(path)` decides create vs unlock (dir-as-vault and
@@ -140,6 +141,8 @@ keep returning English errors untouched — translation never alters validation.
   Settings / About / Lock, inside `HScroll`) + `widget.List`. List rows: left (name bold + issuer), right
   (monospace code or `••• •••` when hide-until-selected, `Ns` countdown bold at ≤5s, progress bar).
   Enter copies the selected code (unless typing in an entry).
+  Two toolbar rows (account actions / vault & app, all with theme icons) replace
+  the old scrolling single row.
   `OnSelected/OnUnselected` → `selectAccount` (enables/disables Copy/Edit/Delete/Export + refresh for masking).
 - Dialogs: `accountDialog` (Add/Edit with name/issuer/secret+show-toggle/digits/period/algorithm,
   validates via `Normalize`; edit verifies the index still holds the same account), `importDialog` (password entry for URI, `ParseURI`),

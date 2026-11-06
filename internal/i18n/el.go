@@ -18,6 +18,8 @@ var elStrings = map[string]string{
 	"btn.save":     "Αποθήκευση",
 	"btn.cancel":   "Ακύρωση",
 	"btn.import":   "Εισαγωγή",
+	"btn.import_uri": "Εισαγωγή URI",
+	"btn.paste_qr": "Επικόλληση QR",
 
 	"login.cannot_read": "Αδυναμία ανάγνωσης θησαυροφυλακίου",
 	"login.is_dir":      "η διαδρομή του θησαυροφυλακίου είναι φάκελος",

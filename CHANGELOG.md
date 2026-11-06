@@ -5,6 +5,15 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+### Fixed
+
+- Toolbar `Import URI` / `Paste QR` showed raw `btn.*` keys in every language;
+  the two message IDs now exist in all 7 tables, with a regression test
+  (`TestAllUIKeysTranslated`) scanning `ui.go` for untranslated IDs.
+- Toolbar is two icon rows (account actions / vault & app) instead of one
+  scrolling strip; every button has a theme icon, Lock uses logout icon.
+- App + window icon: embedded teal padlock (`icon.svg`) via `SetIcon`.
+
 ## [1.0.0] - 2026-11-06
 
 ### Added

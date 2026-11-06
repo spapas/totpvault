@@ -22,6 +22,8 @@ var enStrings = map[string]string{
 	"btn.save":     "Save",
 	"btn.cancel":   "Cancel",
 	"btn.import":   "Import",
+	"btn.import_uri": "Import URI",
+	"btn.paste_qr": "Paste QR",
 
 	"login.cannot_read": "Cannot read vault",
 	"login.is_dir":      "vault path is a directory",

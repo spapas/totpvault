@@ -18,6 +18,8 @@ var frStrings = map[string]string{
 	"btn.save":     "Enregistrer",
 	"btn.cancel":   "Annuler",
 	"btn.import":   "Importer",
+	"btn.import_uri": "Importer l’URI",
+	"btn.paste_qr": "Coller le QR",
 
 	"login.cannot_read": "Impossible de lire le coffre",
 	"login.is_dir":      "le chemin du coffre est un dossier",

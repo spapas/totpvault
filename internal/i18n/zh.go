@@ -18,6 +18,8 @@ var zhStrings = map[string]string{
 	"btn.save":     "保存",
 	"btn.cancel":   "取消",
 	"btn.import":   "导入",
+	"btn.import_uri": "导入 URI",
+	"btn.paste_qr": "粘贴二维码",
 
 	"login.cannot_read": "无法读取保管库",
 	"login.is_dir":      "保管库路径是一个目录",

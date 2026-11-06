@@ -18,6 +18,8 @@ var itStrings = map[string]string{
 	"btn.save":     "Salva",
 	"btn.cancel":   "Annulla",
 	"btn.import":   "Importa",
+	"btn.import_uri": "Importa URI",
+	"btn.paste_qr": "Incolla QR",
 
 	"login.cannot_read": "Impossibile leggere il vault",
 	"login.is_dir":      "il percorso del vault è una cartella",

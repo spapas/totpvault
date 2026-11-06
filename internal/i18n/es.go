@@ -18,6 +18,8 @@ var esStrings = map[string]string{
 	"btn.save":     "Guardar",
 	"btn.cancel":   "Cancelar",
 	"btn.import":   "Importar",
+	"btn.import_uri": "Importar URI",
+	"btn.paste_qr": "Pegar QR",
 
 	"login.cannot_read": "No se puede leer la bóveda",
 	"login.is_dir":      "la ruta de la bóveda es una carpeta",
