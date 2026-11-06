@@ -91,7 +91,7 @@ var frStrings = map[string]string{
 	"settings.err_idle":     "minutes d’inactivité invalides",
 
 	"about.title": "À propos de TOTP Vault",
-	"about.body":  "Authentificateur TOTP hors ligne.\n\nCoffre : %s\nSauvegardez vault.dat en lieu sûr — un mot de passe maître oublié ne peut pas être récupéré.\n\nSi tous les codes échouent, vérifiez l’horloge système.\n\nEntrée copie le code sélectionné. Masquez les codes jusqu’à la sélection dans Paramètres.",
+	"about.body":  "Authentificateur TOTP hors ligne.\n\nCoffre : %s\nSauvegardez vault.dat en lieu sûr — un mot de passe maître oublié ne peut pas être récupéré.\n\nSi tous les codes échouent, vérifiez l’horloge système.\n\nEntrée ou Ctrl+C copie le code sélectionné. Masquez les codes jusqu’à la sélection dans Paramètres.",
 
 	"dup.account": "compte en double %q (les entrées %d et %d partagent nom et émetteur)",
 	"dup.secret":  "secret en double (les entrées %d et %d contiennent la même clé avec des paramètres identiques)",

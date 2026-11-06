@@ -91,7 +91,7 @@ var deStrings = map[string]string{
 	"settings.err_idle":     "ungültige Minuten für Inaktivität",
 
 	"about.title": "Über TOTP Vault",
-	"about.body":  "Offline-TOTP-Authentifikator.\n\nTresor: %s\nSichern Sie vault.dat an einem sicheren Ort — ein vergessenes Masterpasswort kann nicht wiederhergestellt werden.\n\nWenn alle Codes fehlschlagen, prüfen Sie die Systemuhr.\n\nEingabe kopiert den ausgewählten Code. Codes bis zur Auswahl in den Einstellungen ausblenden.",
+	"about.body":  "Offline-TOTP-Authentifikator.\n\nTresor: %s\nSichern Sie vault.dat an einem sicheren Ort — ein vergessenes Masterpasswort kann nicht wiederhergestellt werden.\n\nWenn alle Codes fehlschlagen, prüfen Sie die Systemuhr.\n\nEingabe oder Strg+C kopiert den ausgewählten Code. Codes bis zur Auswahl in den Einstellungen ausblenden.",
 
 	"dup.account": "doppeltes Konto %q (Einträge %d und %d teilen Name und Anbieter)",
 	"dup.secret":  "doppeltes Secret (Einträge %d und %d enthalten denselben Schlüssel mit identischen Einstellungen)",

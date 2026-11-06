@@ -17,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/spapas/totpvault/internal/i18n"
@@ -325,11 +326,12 @@ func (c *controller) main() {
 	c.list = widget.NewList(func() int { return len(c.visible) }, func() fyne.CanvasObject {
 		code := widget.NewLabelWithStyle("000 000", fyne.TextAlignTrailing, fyne.TextStyle{Monospace: true, Bold: true})
 		count := widget.NewLabel("30s")
+		top := container.NewHBox(code, count)
 		bar := widget.NewProgressBar()
 		bar.Min = 0
 		bar.Max = 1
 		bar.TextFormatter = func() string { return "" }
-		return container.NewBorder(nil, nil, nil, container.NewVBox(code, count, bar), container.NewVBox(widget.NewLabelWithStyle(c.t("acct.f_account"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewLabel(c.t("acct.f_issuer"))))
+		return container.NewBorder(nil, nil, nil, container.NewVBox(top, bar), container.NewVBox(widget.NewLabelWithStyle(c.t("acct.f_account"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewLabel(c.t("acct.f_issuer"))))
 	}, func(id widget.ListItemID, obj fyne.CanvasObject) {
 		if id < 0 || id >= len(c.visible) {
 			return
@@ -340,14 +342,17 @@ func (c *controller) main() {
 		right := row.Objects[1].(*fyne.Container)
 		left.Objects[0].(*widget.Label).SetText(a.Name)
 		left.Objects[1].(*widget.Label).SetText(a.Issuer)
+		pair := right.Objects[0].(*fyne.Container)
+		codeLabel := pair.Objects[0].(*widget.Label)
+		countLabel := pair.Objects[1].(*widget.Label)
+		bar := right.Objects[1].(*widget.ProgressBar)
 		if c.hideCodes && c.visible[id] != c.selected {
 			nowUnix := time.Now().Unix()
 			rem := a.Period - int(nowUnix%int64(a.Period))
-			right.Objects[0].(*widget.Label).SetText("••• •••")
-			countLabel := right.Objects[1].(*widget.Label)
+			codeLabel.SetText("••• •••")
 			countLabel.TextStyle = fyne.TextStyle{Bold: rem <= 5}
 			countLabel.SetText(fmt.Sprintf("%ds", rem))
-			right.Objects[2].(*widget.ProgressBar).SetValue(float64(rem) / float64(a.Period))
+			bar.SetValue(float64(rem) / float64(a.Period))
 			return
 		}
 		code, remaining, err := totp.Code(a, time.Now())
@@ -359,11 +364,10 @@ func (c *controller) main() {
 		} else if len(code) == 8 {
 			code = code[:4] + " " + code[4:]
 		}
-		right.Objects[0].(*widget.Label).SetText(code)
-		countLabel := right.Objects[1].(*widget.Label)
+		codeLabel.SetText(code)
 		countLabel.TextStyle = fyne.TextStyle{Bold: err == nil && remaining <= 5}
 		countLabel.SetText(fmt.Sprintf("%ds", remaining))
-		right.Objects[2].(*widget.ProgressBar).SetValue(float64(remaining) / float64(a.Period))
+		bar.SetValue(float64(remaining) / float64(a.Period))
 	})
 	c.list.OnSelected = func(id widget.ListItemID) {
 		c.touch()
@@ -373,14 +377,10 @@ func (c *controller) main() {
 	}
 	c.list.OnUnselected = func(widget.ListItemID) { c.selectAccount(-1) }
 	add := widget.NewButtonWithIcon(c.t("btn.add"), theme.ContentAddIcon(), func() { c.touch(); c.accountDialog(-1) })
-	importURI := widget.NewButtonWithIcon(c.t("btn.import_uri"), theme.DownloadIcon(), c.importDialog)
-	pasteQR := widget.NewButtonWithIcon(c.t("btn.paste_qr"), theme.ContentPasteIcon(), c.pasteQRImage)
-	lock := widget.NewButtonWithIcon(c.t("btn.lock"), theme.LogoutIcon(), c.lock)
-	settings := widget.NewButtonWithIcon(c.t("btn.settings"), theme.SettingsIcon(), c.settings)
-	about := widget.NewButtonWithIcon(c.t("btn.about"), theme.InfoIcon(), c.aboutDialog)
-	row1 := container.NewHBox(add, c.copy, c.edit, c.delete, c.export)
-	row2 := container.NewHBox(importURI, pasteQR, settings, about, lock)
-	c.w.SetContent(container.NewBorder(container.NewVBox(widget.NewLabelWithStyle(c.t("main.title"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.search, row1, row2), c.status, nil, nil, c.list))
+	var more *widget.Button
+	more = widget.NewButtonWithIcon("", theme.MoreHorizontalIcon(), func() { c.touch(); c.showMoreMenu(more) })
+	bar := container.NewHBox(add, c.copy, c.edit, c.delete, c.export, more)
+	c.w.SetContent(container.NewBorder(container.NewVBox(widget.NewLabelWithStyle(c.t("main.title"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.search, bar), c.status, nil, nil, c.list))
 	// Enter copies the selected code (unless typing in a text field).
 	c.w.Canvas().SetOnTypedKey(func(e *fyne.KeyEvent) {
 		if e.Name != fyne.KeyReturn && e.Name != fyne.KeyEnter {
@@ -391,7 +391,35 @@ func (c *controller) main() {
 		}
 		c.copyCode()
 	})
+	// Ctrl+C copies the selected code, unless a dialog is open or an entry
+	// has focus (the entry keeps its own copy-text shortcut then).
+	c.w.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyC, Modifier: fyne.KeyModifierControl},
+		func(fyne.Shortcut) {
+			if len(c.dialogs) > 0 {
+				return
+			}
+			if _, ok := c.w.Canvas().Focused().(*widget.Entry); ok {
+				return
+			}
+			c.copyCode()
+		})
 	c.filter()
+}
+
+// showMoreMenu opens the overflow menu for vault/app actions that do not
+// need a selected account.
+func (c *controller) showMoreMenu(anchor fyne.CanvasObject) {
+	m := fyne.NewMenu("",
+		fyne.NewMenuItem(c.t("btn.import_uri"), func() { c.importDialog() }),
+		fyne.NewMenuItem(c.t("btn.paste_qr"), func() { c.pasteQRImage() }),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem(c.t("btn.settings"), func() { c.settings() }),
+		fyne.NewMenuItem(c.t("btn.about"), func() { c.aboutDialog() }),
+		fyne.NewMenuItem(c.t("btn.lock"), func() { c.lock() }),
+	)
+	pop := widget.NewPopUpMenu(m, c.w.Canvas())
+	bounds := anchor.Size()
+	pop.ShowAtRelativePosition(fyne.NewPos(0, bounds.Height), anchor)
 }
 
 func (c *controller) filter() {

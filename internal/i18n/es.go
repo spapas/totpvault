@@ -91,7 +91,7 @@ var esStrings = map[string]string{
 	"settings.err_idle":     "minutos de inactividad no válidos",
 
 	"about.title": "Acerca de TOTP Vault",
-	"about.body":  "Autenticador TOTP sin conexión.\n\nBóveda: %s\nHaz una copia de seguridad de vault.dat en un lugar seguro — una contraseña maestra olvidada no se puede recuperar.\n\nSi todos los códigos fallan, comprueba el reloj del sistema.\n\nIntro copia el código seleccionado. Oculta los códigos hasta seleccionar en Ajustes.",
+	"about.body":  "Autenticador TOTP sin conexión.\n\nBóveda: %s\nHaz una copia de seguridad de vault.dat en un lugar seguro — una contraseña maestra olvidada no se puede recuperar.\n\nSi todos los códigos fallan, comprueba el reloj del sistema.\n\nIntro o Ctrl+C copia el código seleccionado. Oculta los códigos hasta seleccionar en Ajustes.",
 
 	"dup.account": "cuenta duplicada %q (las entradas %d y %d comparten nombre y emisor)",
 	"dup.secret":  "secreto duplicado (las entradas %d y %d contienen la misma clave con ajustes idénticos)",

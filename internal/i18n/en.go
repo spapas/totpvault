@@ -95,7 +95,7 @@ var enStrings = map[string]string{
 	"settings.err_idle":     "invalid idle minutes",
 
 	"about.title": "About TOTP Vault",
-	"about.body":  "Offline TOTP authenticator.\n\nVault: %s\nBack up vault.dat to a safe place — a forgotten master password cannot be recovered.\n\nIf all codes fail, check the system clock.\n\nEnter copies the selected code. Hide codes until selected in Settings.",
+	"about.body":  "Offline TOTP authenticator.\n\nVault: %s\nBack up vault.dat to a safe place — a forgotten master password cannot be recovered.\n\nIf all codes fail, check the system clock.\n\nEnter or Ctrl+C copies the selected code. Hide codes until selected in Settings.",
 
 	"dup.account": "duplicate account %q (entries %d and %d share name and issuer)",
 	"dup.secret":  "duplicate secret (entries %d and %d hold the same key with identical settings)",

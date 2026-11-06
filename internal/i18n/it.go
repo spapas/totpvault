@@ -91,7 +91,7 @@ var itStrings = map[string]string{
 	"settings.err_idle":     "minuti di inattività non validi",
 
 	"about.title": "Informazioni su TOTP Vault",
-	"about.body":  "Autenticatore TOTP offline.\n\nVault: %s\nEsegui il backup di vault.dat in un luogo sicuro — una password principale dimenticata non può essere recuperata.\n\nSe tutti i codici falliscono, controlla l’orologio di sistema.\n\nInvio copia il codice selezionato. Nascondi i codici fino alla selezione nelle Impostazioni.",
+	"about.body":  "Autenticatore TOTP offline.\n\nVault: %s\nEsegui il backup di vault.dat in un luogo sicuro — una password principale dimenticata non può essere recuperata.\n\nSe tutti i codici falliscono, controlla l’orologio di sistema.\n\nInvio o Ctrl+C copia il codice selezionato. Nascondi i codici fino alla selezione nelle Impostazioni.",
 
 	"dup.account": "account duplicato %q (le voci %d e %d condividono nome ed emittente)",
 	"dup.secret":  "segreto duplicato (le voci %d e %d contengono la stessa chiave con impostazioni identiche)",

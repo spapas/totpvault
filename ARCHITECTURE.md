@@ -140,9 +140,11 @@ keep returning English errors untouched — translation never alters validation.
 - `main()` — search entry + toolbar (Add / Import URI / Paste QR / Copy / Edit / Delete / Export /
   Settings / About / Lock, inside `HScroll`) + `widget.List`. List rows: left (name bold + issuer), right
   (monospace code or `••• •••` when hide-until-selected, `Ns` countdown bold at ≤5s, progress bar).
-  Enter copies the selected code (unless typing in an entry).
-  Two toolbar rows (account actions / vault & app, all with theme icons) replace
-  the old scrolling single row.
+  Enter copies the selected code (unless typing in an entry); Ctrl+C does the
+  same unless a dialog is open or an entry has focus.
+  One toolbar row (account actions + overflow ⋯ menu for vault/app actions)
+  replaces the old two-row strip; every button keeps its theme icon.
+  Rows are condensed: right side is code+countdown on one line over the bar.
   `OnSelected/OnUnselected` → `selectAccount` (enables/disables Copy/Edit/Delete/Export + refresh for masking).
 - Dialogs: `accountDialog` (Add/Edit with name/issuer/secret+show-toggle/digits/period/algorithm,
   validates via `Normalize`; edit verifies the index still holds the same account), `importDialog` (password entry for URI, `ParseURI`),

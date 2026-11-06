@@ -91,7 +91,7 @@ var zhStrings = map[string]string{
 	"settings.err_idle":     "空闲分钟数无效",
 
 	"about.title": "关于 TOTP Vault",
-	"about.body":  "离线 TOTP 验证器。\n\n保管库：%s\n请将 vault.dat 备份到安全位置 — 忘记的主密码无法恢复。\n\n如果所有验证码都失败，请检查系统时钟。\n\n按回车复制所选验证码。可在“设置”中隐藏验证码直到选中。",
+	"about.body":  "离线 TOTP 验证器。\n\n保管库：%s\n请将 vault.dat 备份到安全位置 — 忘记的主密码无法恢复。\n\n如果所有验证码都失败，请检查系统时钟。\n\n按回车或 Ctrl+C 复制所选验证码。可在“设置”中隐藏验证码直到选中。",
 
 	"dup.account": "账户重复 %q（第 %d 和第 %d 条记录的名称和发行方相同）",
 	"dup.secret":  "密钥重复（第 %d 和第 %d 条记录持有相同设置下的同一密钥）",
