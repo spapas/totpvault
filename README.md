@@ -94,4 +94,4 @@ Update `VERSION` (for example, `0.1.1`) and push to `master`. Once both platform
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for component and data-flow overview, [SECURITY.md](SECURITY.md) for the format, threat model and limitations, and [docs/VALIDATION.md](docs/VALIDATION.md) for the checks performed on the initial implementation. Agents contributing code should start with [AGENTS.md](AGENTS.md).
 
-QR image/camera import and authenticator-specific bulk exports are not implemented in this version, except for single QR screenshots pasted from the clipboard.
+Camera capture and bulk export/import are not implemented; only single-account URI import/export and single QR screenshots pasted from the clipboard are supported.

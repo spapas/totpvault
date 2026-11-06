@@ -5,6 +5,20 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-15
+
+### Added
+
+- **Export**: copy a selected account's `otpauth://totp/...` provisioning URI
+  to the clipboard for import in another app. Copies only after confirmation
+  and the clipboard clears after 15 seconds if unchanged.
+- Scoop install instructions for Windows (`README.md`).
+
+### Fixed
+
+- `ParseURI`: correctly handle `%3A`-encoded `issuer:name` separators in the
+  label and keep `issuer`/`label` mismatch checks fail-closed.
+
 ## [0.2.0] - 2026-10-10
 
 ### Added

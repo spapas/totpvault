@@ -7,7 +7,8 @@ One encrypted file (`vault.dat`) holds all TOTP accounts. One Go binary does
 everything: file handling, crypto, code generation, GUI.
 
 Design goals: small surface, fail closed, no network, no recovery backdoor.
-Non-goals: QR/camera import, bulk export, sync, browser integration, mobile.
+Non-goals: camera capture, bulk export/import, sync, browser integration, mobile.
+Single-account URI import/export and single QR screenshots pasted from the clipboard are implemented.
 
 ```
 ┌─────────────┐   --vault path    ┌──────────────┐
@@ -40,7 +41,7 @@ Non-goals: QR/camera import, bulk export, sync, browser integration, mobile.
 
 No crypto, no TOTP logic here. Only path + single-instance guard.
 
-## 3. TOTP core — `internal/totp/totp.go` (147 lines, pure)
+## 3. TOTP core — `internal/totp/totp.go` (210 lines, pure)
 
 `Account{name, issuer, secret, digits, period, algorithm}` — JSON-serializable,
 also the vault payload unit.
@@ -104,13 +105,13 @@ Session.Lock() ── clear(key), zero accounts, nil both
 - Errors: `ErrAuthentication` (wrong pw or tamper — deliberately ambiguous),
   `ErrChanged`, `ErrLocked`, plus descriptive format/validation errors.
 
-## 5. UI — `internal/ui/ui.go` (467 lines) + `theme.go` (55 lines)
+## 5. UI — `internal/ui/ui.go` (559 lines) + `theme.go` (55 lines)
 
 Single `controller` struct owns everything per window:
 
 ```
 controller{app, w, path, session *vault.Session, accounts, visible []int,
-  selected, list, search, edit/delete/copy buttons, status,
+  selected, list, search, edit/delete/copy/export buttons, status,
   lastActivity, idle (default 5m), clipboard+clipboardUntil, dialogs, stopped}
 ```
 
@@ -127,7 +128,7 @@ controller{app, w, path, session *vault.Session, accounts, visible []int,
 - `main()` — search entry + toolbar (Add / Import URI / Paste QR / Copy / Edit / Delete / Export /
   Settings / Lock) + `widget.List`. List rows: left (name bold + issuer), right
   (monospace code `123 456`/`1234 5678`, `Ns` countdown, progress bar `remaining/period`).
-  `OnSelected/OnUnselected` → `selectAccount` (enables/disables Copy/Edit/Delete).
+  `OnSelected/OnUnselected` → `selectAccount` (enables/disables Copy/Edit/Delete/Export).
 - Dialogs: `accountDialog` (Add/Edit with name/issuer/secret/digits/period/algorithm,
   validates via `Normalize`), `importDialog` (password entry for URI, `ParseURI`),
   `exportAccount` (confirmation before copying one account's secret-bearing URI;
@@ -144,7 +145,7 @@ controller{app, w, path, session *vault.Session, accounts, visible []int,
 - **`touch()` discipline:** only explicit actions (typing in form/search, select,
   button handlers) call `touch()`. The 250 ms `tick` and mouse movement never do.
 - **`tick()` (UI thread via `fyne.Do`):** expire clipboard (clear only if OS clipboard
-  still equals copied code) → if `session==nil` return → if `now-lastActivity >= idle`
+  still equals copied code or URI) → if `session==nil` return → if `now-lastActivity >= idle`
   then `lock()` → else `list.Refresh()` (recomputes codes/countdowns).
 - **`lock()`:** hide all dialogs, `session.Lock(); session=nil`, zero `accounts`,
   reset selection/list handle, `clearClipboard()`, back to `login()`.
