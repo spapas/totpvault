@@ -5,6 +5,8 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-06
+
 ### Fixed
 
 - Toolbar `Import URI` / `Paste QR` showed raw `btn.*` keys in every language;
@@ -13,6 +15,7 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 - Toolbar is two icon rows (account actions / vault & app) instead of one
   scrolling strip; every button has a theme icon, Lock uses logout icon.
 - App + window icon: embedded teal padlock (`icon.svg`) via `SetIcon`.
+- README screenshots (software-rendered UI).
 
 ## [1.0.0] - 2026-11-06
 
