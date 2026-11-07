@@ -19,7 +19,7 @@ Linux amd64 and Windows amd64 GUI executables were compiled successfully, includ
 
 No independent cryptographic review, malicious-host testing, power-loss fault injection or real user secrets were part of these checks. The GitHub workflow is configured to repeat tests, static checks, vulnerability checks and builds on Linux and Windows after the repository is created.
 
-## i18n (unreleased)
+## i18n (released in 1.0.0)
 
 - New offline `internal/i18n` package: English source strings plus French,
   German, Italian, Spanish, Chinese (Simplified) and Greek tables, compiled
@@ -31,3 +31,21 @@ No independent cryptographic review, malicious-host testing, power-loss fault in
   as a non-secret tag in app preferences; screens rebuild on switch.
   `go test` passes for `i18n`/`totp`/`vault`/`qrimg`; full Fyne UI tests and
   native builds run in CI (this environment has no C99/MinGW toolchain).
+
+## Re-validation 1.1.0 / 1.2.0 — 7 November 2026 (Europe/Athens)
+
+Go 1.27.1 windows/amd64, commit `84b83cb` (after the `1.2.0` bump).
+
+- `go test -race ./...`: passed, all packages including `internal/ui`
+  with the native desktop-driver dependencies enabled.
+- `go vet ./...`: passed.
+- `go mod verify`: passed (`all modules verified`).
+- `govulncheck ./...`: not run locally; covered by CI on both platforms.
+- Screenshots re-inspected: `docs/screenshots/main.png` shows the 1.2.0
+  single-row toolbar (Add / Copy / Edit / Delete / Export + overflow),
+  condensed code+countdown rows and `3 accounts - auto-lock after 5m idle`
+  status; `docs/screenshots/login.png` shows the unlock screen. Both legible,
+  no overlap.
+- `1.1.0` fixes re-covered by tests: missing-toolbar-key regression test
+  (`TestAllUIKeysTranslated`) passes; app/window icon set via embedded
+  `icon.svg`.
