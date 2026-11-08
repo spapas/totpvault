@@ -126,14 +126,12 @@ fn write_sync(mut f: &File, b: &[u8]) -> Result<(), Error> {
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<(), Error> {
-    if let Some(dir) = path.parent() {
-        if !dir.as_os_str().is_empty() {
-            fs::create_dir_all(dir).map_err(io_err)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
-            }
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        fs::create_dir_all(dir).map_err(io_err)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
         }
     }
     Ok(())

@@ -22,10 +22,10 @@ fn load_all() -> serde_json::Map<String, serde_json::Value> {
 
 fn save_all(map: &serde_json::Map<String, serde_json::Value>) {
     let Some(p) = prefs_path() else { return };
-    if let Some(dir) = p.parent() {
-        if std::fs::create_dir_all(dir).is_err() {
-            return;
-        }
+    if let Some(dir) = p.parent()
+        && std::fs::create_dir_all(dir).is_err()
+    {
+        return;
     }
     let _ = std::fs::write(p, serde_json::Value::Object(map.clone()).to_string());
 }

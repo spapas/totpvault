@@ -79,16 +79,14 @@ fn main() {
         Ok(p) => p,
         Err(e) => show_fatal(&format!("{}: {e}", abs.display())),
     };
-    if let Some(dir) = abs.parent() {
-        if !dir.as_os_str().is_empty() {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                show_fatal(&format!("{}: {e}", dir.display()));
-            }
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
-            }
+    if let Some(dir) = abs.parent().filter(|d| !d.as_os_str().is_empty()) {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            show_fatal(&format!("{}: {e}", dir.display()));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
         }
     }
     // Single-instance guard: exclusive lock on vault.dat.lock.

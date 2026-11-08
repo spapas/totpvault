@@ -1096,42 +1096,42 @@ impl TotpApp {
         }
         if edit {
             self.touch();
-            if let Some(i) = self.selected {
-                if let Some(a) = self.accounts.get(i).cloned() {
-                    self.dialog = Dialog::Account(AccountForm {
-                        is_edit: true,
-                        index: i,
-                        orig: Some(a.clone()),
-                        name: a.name,
-                        issuer: a.issuer,
-                        secret: a.secret,
-                        digits: a.digits.to_string(),
-                        period: a.period.to_string(),
-                        algorithm: a.algorithm,
-                    });
-                }
+            if let Some(i) = self.selected
+                && let Some(a) = self.accounts.get(i).cloned()
+            {
+                self.dialog = Dialog::Account(AccountForm {
+                    is_edit: true,
+                    index: i,
+                    orig: Some(a.clone()),
+                    name: a.name,
+                    issuer: a.issuer,
+                    secret: a.secret,
+                    digits: a.digits.to_string(),
+                    period: a.period.to_string(),
+                    algorithm: a.algorithm,
+                });
             }
         }
         if delete {
             self.touch();
-            if let Some(i) = self.selected {
-                if let Some(a) = self.accounts.get(i) {
-                    let mut label = a.name.clone();
-                    if !a.issuer.is_empty() {
-                        label = format!("{label} ({})", a.issuer);
-                    }
-                    self.dialog = Dialog::DeleteConfirm { index: i, label };
+            if let Some(i) = self.selected
+                && let Some(a) = self.accounts.get(i)
+            {
+                let mut label = a.name.clone();
+                if !a.issuer.is_empty() {
+                    label = format!("{label} ({})", a.issuer);
                 }
+                self.dialog = Dialog::DeleteConfirm { index: i, label };
             }
         }
         if export {
             self.touch();
-            if let Some(i) = self.selected {
-                if let Some(a) = self.accounts.get(i) {
-                    match totp::provisioning_uri(a) {
-                        Ok(uri) => self.dialog = Dialog::ExportConfirm { uri },
-                        Err(e) => self.show_err(e.0),
-                    }
+            if let Some(i) = self.selected
+                && let Some(a) = self.accounts.get(i)
+            {
+                match totp::provisioning_uri(a) {
+                    Ok(uri) => self.dialog = Dialog::ExportConfirm { uri },
+                    Err(e) => self.show_err(e.0),
                 }
             }
         }
