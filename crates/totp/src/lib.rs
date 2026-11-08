@@ -595,7 +595,7 @@ mod tests {
             format!("otpauth://totp/x?secret={secret}&period=-1"),
             format!("otpauth://user@totp/x?secret={secret}"),
             format!("otpauth://totp/x?secret={secret}#frag"),
-            format!("otpauth://totp/x?secret=!!!!"),
+            "otpauth://totp/x?secret=!!!!".to_string(),
             "otpauth://totp/x?secret=JBSWY3DP".to_string(),
         ] {
             assert!(parse_uri(&raw).is_err(), "accepted {raw}");
