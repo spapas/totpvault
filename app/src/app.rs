@@ -562,14 +562,13 @@ fn install_fonts(ctx: &egui::Context) {
         // provider (memory-mapped, not copied into RAM): no preload here.
     } else {
         // Linux: Noto Sans as the native-ish proportional font.
-        for file in ["/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"] {
-            if let Some(bytes) = load_font_file(std::path::Path::new(file)) {
-                defs.font_data.insert(
-                    "noto-sans".to_string(),
-                    egui::FontData::from_owned(bytes).into(),
-                );
-                prop_first.push("noto-sans".to_string());
-            }
+        let file = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf";
+        if let Some(bytes) = load_font_file(std::path::Path::new(file)) {
+            defs.font_data.insert(
+                "noto-sans".to_string(),
+                egui::FontData::from_owned(bytes).into(),
+            );
+            prop_first.push("noto-sans".to_string());
         }
     }
 
@@ -929,37 +928,25 @@ impl TotpApp {
                     add = true;
                 }
                 if ui
-                    .add_enabled(
-                        sel,
-                        egui::Button::new(format!("{}", self.t("btn.copy", &[]))),
-                    )
+                    .add_enabled(sel, egui::Button::new(self.t("btn.copy", &[])))
                     .clicked()
                 {
                     copy = true;
                 }
                 if ui
-                    .add_enabled(
-                        sel,
-                        egui::Button::new(format!("{}", self.t("btn.edit", &[]))),
-                    )
+                    .add_enabled(sel, egui::Button::new(self.t("btn.edit", &[])))
                     .clicked()
                 {
                     edit = true;
                 }
                 if ui
-                    .add_enabled(
-                        sel,
-                        egui::Button::new(format!("{}", self.t("btn.delete", &[]))),
-                    )
+                    .add_enabled(sel, egui::Button::new(self.t("btn.delete", &[])))
                     .clicked()
                 {
                     delete = true;
                 }
                 if ui
-                    .add_enabled(
-                        sel,
-                        egui::Button::new(format!("{}", self.t("btn.export", &[]))),
-                    )
+                    .add_enabled(sel, egui::Button::new(self.t("btn.export", &[])))
                     .clicked()
                 {
                     export = true;
@@ -1169,7 +1156,7 @@ impl TotpApp {
                 let mut cancel = false;
                 egui::Window::new(self.t(if f.is_edit { "acct.edit" } else { "acct.add" }, &[]))
                     .open(&mut open)
-                    .show(&mut *ui, |ui| {
+                    .show(&*ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(self.t("acct.f_account", &[]));
                             ui.text_edit_singleline(&mut f.name);
@@ -1266,7 +1253,7 @@ impl TotpApp {
                 let mut go = false;
                 egui::Window::new(self.t("import.title", &[]))
                     .open(&mut open)
-                    .show(&mut *ui, |ui| {
+                    .show(&*ui, |ui| {
                         ui.text_edit_singleline(&mut uri);
                         ui.horizontal(|ui| {
                             if ui.button(self.t("btn.import", &[])).clicked() {
@@ -1303,7 +1290,7 @@ impl TotpApp {
                 let mut go = false;
                 egui::Window::new(self.t("export.title", &[]))
                     .open(&mut open)
-                    .show(&mut *ui, |ui| {
+                    .show(&*ui, |ui| {
                         ui.label(self.t("export.msg", &[]));
                         ui.horizontal(|ui| {
                             if ui.button(self.t("btn.copy", &[])).clicked() {
@@ -1334,7 +1321,7 @@ impl TotpApp {
                 let mut go = false;
                 egui::Window::new(self.t("delete.title", &[]))
                     .open(&mut open)
-                    .show(&mut *ui, |ui| {
+                    .show(&*ui, |ui| {
                         ui.label(self.t("delete.msg", &[label.clone().into()]));
                         ui.horizontal(|ui| {
                             if ui.button(self.t("btn.delete", &[])).clicked() {
@@ -1374,7 +1361,7 @@ impl TotpApp {
                 let mut go = false;
                 egui::Window::new(self.t("settings.title", &[]))
                     .open(&mut open)
-                    .show(&mut *ui, |ui| {
+                    .show(&*ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(self.t("settings.idle", &[]));
                             egui::ComboBox::from_id_salt("idle")
@@ -1447,14 +1434,13 @@ impl TotpApp {
                             self.dialog = Dialog::Settings(f);
                             return;
                         }
-                        if !f.new_pw.is_empty() || !f.repeat_pw.is_empty() {
-                            if let Some(sess) = self.session.as_mut()
-                                && let Err(e) = sess.change_password(&f.new_pw)
-                            {
-                                let msg = self.err_text(&e.to_string());
-                                self.dialog = Dialog::Error(msg);
-                                return;
-                            }
+                        if (!f.new_pw.is_empty() || !f.repeat_pw.is_empty())
+                            && let Some(sess) = self.session.as_mut()
+                            && let Err(e) = sess.change_password(&f.new_pw)
+                        {
+                            let msg = self.err_text(&e.to_string());
+                            self.dialog = Dialog::Error(msg);
+                            return;
                         }
                         match f.idle.parse::<u64>() {
                             Ok(n) if n > 0 => self.idle_minutes = n,
@@ -1493,7 +1479,7 @@ impl TotpApp {
                 let mut open = true;
                 egui::Window::new(self.t("about.title", &[]))
                     .open(&mut open)
-                    .show(&mut *ui, |ui| {
+                    .show(&*ui, |ui| {
                         ui.label(self.t("about.body", &[self.path.clone().into()]));
                     });
                 if open {
@@ -1506,7 +1492,7 @@ impl TotpApp {
                 egui::Window::new("⚠")
                     .open(&mut open)
                     .collapsible(false)
-                    .show(&mut *ui, |ui| {
+                    .show(&*ui, |ui| {
                         ui.label(&msg);
                         if ui.button(self.t("btn.close", &[])).clicked() {
                             cancelled = true;
