@@ -1,7 +1,9 @@
 /dist/
+/target/
 *.exe
 *.test
 vault.dat
 vault.dat.lock
 .totpvault-*
 *.png
+prefs.json

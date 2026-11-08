@@ -5,6 +5,22 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-08
+
+### Changed
+
+- **Major rewrite in Rust**: the app is now pure Rust with an `egui` GUI
+  (`app/`, `crates/`), built and released for Windows, Linux **and macOS**.
+  Vault format v1 is unchanged — 1.x vaults open directly in 2.0.
+- Go/Fyne 1.x implementation archived read-only in `archived/go/`; Rust is now
+  the repo root (`Cargo.toml`, `crates/`, `app/`, `interop/`).
+- Binary renamed from `totpvault-rs` to `totpvault` (`totpvault.exe` on
+  Windows); release assets are `totpvault-v2.0.0-{windows-amd64.zip,
+  linux-amd64.tar.gz, macos-arm64.tar.gz}` + `SHA256SUMS`.
+- CI now runs `cargo fmt --check`, `cargo test --locked`,
+  `cargo clippy --all-targets --locked -- -D warnings` and `cargo audit` on
+  all three platforms, then packages all three binaries.
+
 ## [1.2.0] - 2026-11-07
 
 ### Changed

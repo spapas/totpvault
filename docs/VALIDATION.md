@@ -49,3 +49,23 @@ Go 1.27.1 windows/amd64, commit `84b83cb` (after the `1.2.0` bump).
 - `1.1.0` fixes re-covered by tests: missing-toolbar-key regression test
   (`TestAllUIKeysTranslated`) passes; app/window icon set via embedded
   `icon.svg`.
+
+## 2.0.0 Rust rewrite — 8 November 2026 (Europe/Athens)
+
+Rust 1.99.1 windows/x86_64-msvc, after the `2.0.0` bump (Go archived).
+
+- `cargo test --locked`: passed, all crates (totp/totp-vectors, vault
+  round-trip/tamper/stale-write/interop, qrimg round-trip/rejects, i18n
+  coverage, app filter/dup unit tests).
+- `cargo fmt --check` / `cargo clippy --all-targets --locked -- -D warnings`:
+  covered by CI on Windows/Linux/macOS (local toolchain lacks fmt/clippy).
+- `cargo audit`: covered by CI (0 vulnerabilities on 2026-11-07 baseline).
+- `cargo build --locked --release -p totpvault`: Windows binary builds
+  (~7 MB class, stripped + LTO).
+- Interop: `vault::tests::go_interop_fixture` reads the archived Go fixture
+  (`interop/go-vault.dat`); `cargo run -p totpvault-vault --example gen`
+  rewrites `interop/rust-vault.dat`.
+- Release packaging: `scripts/package_release.py` validates `MZ`/`ELF`/
+  `Mach-O` magic and produces Windows ZIP + Linux/macOS tar.gz + `SHA256SUMS`.
+- Manual GUI walkthrough of the Rust UI per this file is still pending; the
+  workflow (add/import/QR/copy/lock/settings/about) mirrors 1.x.

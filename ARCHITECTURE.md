@@ -2,223 +2,199 @@
 
 ## 1. What this is
 
-TOTP Vault is an **offline desktop authenticator** (Windows + Linux, amd64).
-One encrypted file (`vault.dat`) holds all TOTP accounts. One Go binary does
-everything: file handling, crypto, code generation, GUI.
+TOTP Vault is an **offline desktop authenticator** (Windows + Linux + macOS,
+Apple Silicon + x86-64). One encrypted file (`vault.dat`) holds all TOTP
+accounts. One Rust binary does everything: file handling, crypto, code
+generation, GUI.
 
 Design goals: small surface, fail closed, no network, no recovery backdoor.
-Non-goals: camera capture, bulk export/import, sync, browser integration, mobile.
-Single-account URI import/export and single QR screenshots pasted from the clipboard are implemented.
+Non-goals: camera capture, bulk export/import, sync, browser integration,
+mobile. Single-account URI import/export and single QR screenshots pasted from
+the clipboard are implemented.
+
+v2.0.0 is a pure-Rust rewrite (`egui`) of the former Go/Fyne app (1.x,
+preserved in `archived/go/`). Vault format v1 is unchanged: v1 and v2 unlock
+each other's `vault.dat`.
 
 ```
 ┌─────────────┐   --vault path    ┌──────────────┐
-│ cmd/totpvault│ ────────────────▶ │ internal/ui  │  Fyne controller
-│ main.go      │  flock .lock file │ controller   │ ─┐
-└─────────────┘  0700 dir         └──────────────┘  │
-        │                                           │ uses
-        │ default path                              ▼
-        │                              ┌────────────────────┐
-        │  Win: %APPDATA%\TotpVault\    │ internal/vault     │  Argon2id +
-        │  Lin: ~/.local/share/        │ Session            │  XChaCha20-Poly1305
-        │       TotpVault/vault.dat    └────────────────────┘
-        │                                           │ encrypts []Account
+│ app/main.rs  │ ────────────────▶ │ app/app.rs   │  egui controller
+│ default path │  .dat.lock file   │ TotpApp      │ ─┐
+│ 0700 dir     │  fs2 lock         └──────────────┘  │
+└─────────────┘                                     │ uses
         │                                           ▼
-        │                              ┌────────────────────┐
-        └─────────────────────────────▶│ internal/totp      │  RFC 6238 pure
-                                       │ Account/Code/URI   │  no I/O
-                                       └────────────────────┘
+        │ default path                ┌────────────────────┐
+        │  Win: %APPDATA%\TotpVault\  │ crates/vault       │  Argon2id +
+        │  Lin: ~/.local/share/      │ Session            │  XChaCha20-Poly1305
+        │  Mac: ~/Library/App Supp/  └────────────────────┘
+        │       TotpVault/vault.dat              │ encrypts []Account
+        │                                        ▼
+        └────────────────────────────▶┌────────────────────┐
+                                      │ crates/totp        │  RFC 6238 pure
+                                      │ Account/Code/URI   │  no I/O
+                                      └────────────────────┘
 ```
 
-## 2. Entry point — `cmd/totpvault/main.go` (57 lines)
+## 2. Entry point — `app/src/main.rs`
 
 1. Parses `--vault`; if empty resolves OS default
-   (Windows: `os.UserConfigDir()`; Linux: `$XDG_DATA_HOME` or `~/.local/share`,
-   both + `TotpVault/vault.dat`).
-2. `filepath.Abs` + `os.MkdirAll(dir, 0700)`.
-3. `flock.New(abs + ".lock").TryLock()` — second instance shows
-   "already open in another instance" via `ui.ShowError` and exits.
-4. Calls `ui.Run(abs)`. `defer lock.Close()`.
+   (`dirs::data_dir()` + `TotpVault/vault.dat`; Windows `%APPDATA%`, Linux
+   `$XDG_DATA_HOME` or `~/.local/share`, macOS `~/Library/Application Support`).
+2. `create_dir_all` + `0700` on Unix.
+3. `fs2::FileExt::try_lock_exclusive` on `vault.dat.lock` — second instance
+   shows a fatal dialog and exits.
+4. Loads language/theme prefs, then `eframe::run_native("TOTP Vault", …)`.
+   `#![windows_subsystem = "windows"]` keeps double-click launches console-free;
+   fatal startup errors also print to stderr plus a Win32 `MessageBoxW`.
 
 No crypto, no TOTP logic here. Only path + single-instance guard.
 
-## 3. TOTP core — `internal/totp/totp.go` (210 lines, pure)
+## 3. TOTP core — `crates/totp` (pure)
 
 `Account{name, issuer, secret, digits, period, algorithm}` — JSON-serializable,
 also the vault payload unit.
 
-- `Normalize(a)` — canonicalizes (trim, uppercase secret/algorithm, strip
+- `normalize(a)` — canonicalizes (trim, uppercase secret/algorithm, strip
   whitespace + `=` padding, defaults `SHA1/6/30`) then validates:
   name required ≤256 B, issuer ≤256 B, digits ∈ {6,8}, period 1–300,
   algorithm ∈ {SHA1,SHA256,SHA512}, secret ≤1024 chars and valid Base32
   decoding to ≥10 bytes. Returns error otherwise.
-- `Code(a, now)` — re-normalizes, rejects pre-epoch clocks, HMAC-SHA*
-  over 8-byte big-endian `floor(unix/period)`, dynamic truncation,
-  `mod 10^digits`, zero-padded. Returns `(code, secondsRemaining, err)`.
-- `ProvisioningURI(account)` — validates and formats one account as an
-  `otpauth://totp/...` URI, preserving encoded label characters and TOTP settings.
-- `ParseURI(raw)` — accepts **only** `otpauth://totp/...` (≤8192 chars, no
+- `code(&account, now_unix)` — re-normalizes, rejects pre-epoch clocks,
+  HMAC-SHA* over 8-byte big-endian `floor(unix/period)`, dynamic truncation,
+  `mod 10^digits`, zero-padded. Returns `(code, secondsRemaining)`.
+- `provisioning_uri(&account)` — validates and formats one account as an
+  `otpauth://totp/...` URI.
+- `parse_uri(raw)` — accepts **only** `otpauth://totp/...` (≤8192 chars, no
   userinfo/fragment). Rejects duplicate params and any query key outside
   `{secret, issuer, algorithm, digits, period}` — so `HOTP`, `lock`, `image`,
   etc. fail. Handles `label = [issuer:]name`, checks issuer/label match,
-  then delegates to `Normalize` for final validation.
+  then delegates to `normalize`.
 
-No filesystem, no clock source beyond the passed `time.Time`, no randomness.
+No filesystem, no clock source beyond the passed Unix time, no randomness.
 
-## 4. Vault — `internal/vault/vault.go` (286 lines)
+## 4. Vault — `crates/vault`
 
 ### 4.1 Format v1 (fixed, see `SECURITY.md`)
 
 | Offset | Size | Content |
 |---|---|---|
 | 0–7 | 8 | magic `TOTPVLT` + version `0x01` |
-| 8–23 | 16 | Argon2id salt (`crypto/rand` at create / password change) |
-| 24–47 | 24 | XChaCha20-Poly1305 nonce (fresh `crypto/rand` **every save**) |
-| 48+ | var | `Seal(plaintext JSON {accounts:[...]}, additionalData=header)` = ciphertext + 16 B tag |
+| 8–23 | 16 | Argon2id salt (`rand` at create / password change) |
+| 24–47 | 24 | XChaCha20-Poly1305 nonce (fresh `rand` **every save**) |
+| 48+ | var | `seal(plaintext JSON {accounts:[...]}, additionalData=header)` = ciphertext + 16 B tag |
 
-KDF pinned: `argon2.IDKey(password, salt, time=3, memory=64MiB, threads=4, keylen=32)`.
+KDF pinned: `argon2id(t=3, m=64MiB, p=4, keylen=32)`.
 KDF params are **not** read from the file — a hostile header cannot tune CPU/RAM.
 Header is AEAD additional data, so salt/nonce/magic tampering fails auth.
 
 Limits enforced on read and write: file ≤8 MiB, accounts ≤10 000, every account
-re-validated via `totp.Normalize` after decrypt (protects against hand-edited
-plaintext produced by a compromised save path).
+re-validated via `totp::normalize` after decrypt.
 
 ### 4.2 Session lifecycle
 
 ```
-Create(path, pw) ── O_EXCL, never overwrites ──▶ Session{key, salt, fingerprint=sha256(file)}
-Unlock(path, pw) ── derive → Open → normalize ─▶ Session{key, salt, accounts, fingerprint}
-Session.Save(accounts) ── normalize → encrypt(fresh nonce) → replace() ─▶ update accounts+fingerprint
-Session.ChangePassword(pw) ── new salt+key → encrypt → replace() ─▶ swap key/salt (old key cleared)
-Session.Lock() ── clear(key), zero accounts, nil both
+Session::create(path, pw) ── O_EXCL, never overwrites ─▶ Session{key, salt, fingerprint=sha256(file)}
+Session::unlock(path, pw) ── derive → open → normalize ─▶ Session{key, salt, accounts, fingerprint}
+session.save(accounts) ── normalize → encrypt(fresh nonce) → replace() ─▶ update accounts+fingerprint
+session.change_password(pw) ── new salt+key → encrypt → replace() ─▶ swap key/salt (old key zeroized)
+Session zeroized on lock/drop via zeroize
 ```
 
-- `CheckPassword`: ≥12 runes, ≤1024 bytes.
-- `read()`: `LimitReader(maxFileSize+1)`, rejects oversize.
-- `replace()`: re-reads file, compares `sha256` to session fingerprint →
-  `ErrChanged` on external modification (anti-stale-write / anti-rollback-within-session);
-  writes temp `.totpvault-*` in same dir → `Write` → `Sync` → `Close` →
-  `Rename` → best-effort dir `Sync` (skipped gracefully on Windows).
-  POSIX temp/vault created `0600`; parent dirs `0700`.
-- `encrypt()`: `json.Marshal` → `Seal`, `clear(plain)` deferred; rejects `ErrLocked`
-  when key is nil and oversize output.
-- Errors: `ErrAuthentication` (wrong pw or tamper — deliberately ambiguous),
-  `ErrChanged`, `ErrLocked`, plus descriptive format/validation errors.
+- `check_password`: ≥12 runes, ≤1024 bytes.
+- `read()`: rejects oversize; `replace()`: re-reads file, compares `sha256`
+  to session fingerprint → `ErrChanged` on external modification;
+  writes temp file in same dir → flush → rename → best-effort dir sync.
+  New vault creation uses exclusive creation.
+- `encrypt()`: `serde_json` → seal, zeroes plaintext best-effort; rejects
+  oversize output.
+- Errors: `Authentication` (wrong pw or tamper — deliberately ambiguous),
+  `Changed`, `Locked`, plus descriptive format/validation errors.
 
-## 5. UI — `internal/ui/ui.go` (720 lines) + `theme.go` (55 lines)
+`interop/` holds cross-compatibility fixtures: `go-vault.dat` was written by
+the archived Go code, `rust-vault.dat` by `cargo run -p totpvault-vault
+--example gen`. Both sides read both files; `vault::tests::go_interop_fixture`
+locks it in.
 
-Single `controller` struct owns everything per window:
+## 5. UI — `app/src/app.rs` + `prefs.rs`
 
-```
-controller{app, w, path, session *vault.Session, accounts, visible []int,
-  selected, list, search, edit/delete/copy/export buttons, status,
-  lastActivity+lastWallUnix, idle (default 5m), hideCodes,
-  clipboard+clipboardUntil, dialogs+clearOnLock, stopped}
-```
+Single `TotpApp` struct owns everything per window. `egui` immediate-mode;
+single UI thread; KDF and QR-clipboard work run on background threads and
+report back via channel.
 
 ### 5.1 Screens
 
-Screens render through `controller.t()` from the offline `internal/i18n`
-package: English message IDs with FR/DE/IT/ES/ZH/EL tables, plural-aware
-status lines, translated backend errors at the display boundary (`errText`).
-`Run` loads the saved `language` app preference or auto-detects the OS
-language (`i18n.Detect`); Settings offers a language selector that persists
-the tag (non-secret) and rebuilds the current screen. `totp`/`vault`/`qrimg`
-keep returning English errors untouched — translation never alters validation.
+Screens render through `totpvault-i18n`: English message IDs with FR/DE/IT/ES/
+ZH/EL tables, plural-aware status lines, translated backend errors at the
+display boundary (`err_text`). `totp`/`vault`/`qrimg` keep returning English
+errors — translation never alters validation.
 
-- `Run(path)` — `app.NewWithID`, theme, 720×520 window, close-intercept → `lock()+Quit`,
-  `a.SetIcon` + `w.SetIcon` use the embedded `icon.svg` padlock (teal rounded square),
-  starts 500 ms goroutine (`fyne.Do(c.tick)`), `ShowAndRun`, on exit `close(stopped)` +
-  `fyne.DoAndWait` final lock (drains a KDF completion queued just before close).
-- `login()` — `os.Stat(path)` decides create vs unlock (dir-as-vault and
-  unreadable path show Retry/Quit instead of a dead end). Password entries
-  (`NewPasswordEntry`), optional confirm + 12-char hint on create. Submit disables
-  form, clears entries, shows "Deriving encryption key…", derives in background goroutine
-  (Argon2id ~blocks), then `fyne.Do` back to UI thread: error → re-enable + message;
-  success → `c.session/c.accounts=touch()+main()`. `stopped` checked so quit-during-KDF
-  locks the stray session.
-- `main()` — search entry + toolbar (Add / Import URI / Paste QR / Copy / Edit / Delete / Export /
-  Settings / About / Lock, inside `HScroll`) + `widget.List`. List rows: left (name bold + issuer), right
-  (monospace code or `••• •••` when hide-until-selected, `Ns` countdown bold at ≤5s, progress bar).
-  Enter copies the selected code (unless typing in an entry); Ctrl+C does the
-  same unless a dialog is open or an entry has focus.
-  One toolbar row (account actions + overflow ⋯ menu for vault/app actions)
-  replaces the old two-row strip; every button keeps its theme icon.
-  Rows are condensed: right side is code+countdown on one line over the bar.
-  `OnSelected/OnUnselected` → `selectAccount` (enables/disables Copy/Edit/Delete/Export + refresh for masking).
-- Dialogs: `accountDialog` (Add/Edit with name/issuer/secret+show-toggle/digits/period/algorithm,
-  validates via `Normalize`; edit verifies the index still holds the same account), `importDialog` (password entry for URI, `ParseURI`),
-  `exportAccount` (confirmation before copying one account's secret-bearing URI;
-  clipboard expires after 15 seconds if unchanged),
-  `deleteAccount` (name + issuer + permanent-loss warning; verifies index identity), `settings` (idle 1/2/5/10/15 min + hide-codes checkbox + optional password change),
-  `aboutDialog` (vault path, backup reminder, clock note, shortcuts).
+- `TotpApp::new(cc, path, lang, theme)` — installs fonts (Segoe UI + Consolas
+  on Windows, Noto Sans on Linux, system fallback on macOS; CJK served on
+  demand by the `system_fonts` provider), applies teal theme, starts at login.
+- Login — create vs unlock decided by path metadata; password entries,
+  optional confirm + 12-char hint on create. Submit clears entries, shows
+  "Deriving encryption key…", derives Argon2id in a background thread, then
+  back to the UI thread: error → message; success → main screen.
+- Main — search entry + toolbar (Add / Copy / Edit / Delete / Export + ⋯ menu
+  for Import / Paste QR / Settings / About / Lock) + scrollable account cards.
+  Cards: avatar (issuer initial), name + issuer, monospace code + countdown
+  ring (red at ≤5 s). Click selects, double-click copies. Enter / Ctrl+C
+  copies the selected code when no text field or dialog owns the keystroke.
+- Dialogs: account add/edit (validates via `normalize`; edit verifies the
+  index still holds the same account), import URI (`parse_uri`), export
+  confirm (copies URI, 15 s expiry), delete confirm, settings (idle 1/2/5/10/
+  15 min + hide-codes + theme + language + optional password change), about
+  (vault path, backup reminder, clock note).
 
-### 5.2 Invariants agents must keep
+### 5.2 Invariants
 
-- **All writes via `c.save(accounts)`** → `session.Save` → `c.accounts = session.Accounts()` → `filter()`.
-- **Stale-session guard:** every dialog captures `session := c.session` at open and
-  aborts on confirm if `c.session != session` (user locked meanwhile); edit/delete
-  also verify the index still holds the same account. Untracked-after-dismiss via `untrack()`; `lock()` hides the rest.
-- **Secrets cleared:** `secret.SetText("")` / `entry.SetText("")` / `password.SetText("")`
-  deferred after each dialog; login clears both password fields before KDF.
-  The same closures are registered in `clearOnLock` and run by `lock()`, so
-  auto-lock while a dialog is open still wipes entries.
-- **`touch()` discipline:** only explicit actions (typing in form/search, select,
-  button handlers, show-secret/about) call `touch()` (monotonic + wall). The 500 ms `tick` and mouse movement never do.
-- **`tick()` (UI thread via `fyne.Do`):** expire clipboard (clear only if OS clipboard
-  still equals copied code or URI) → if `session==nil` return → if `now-lastActivity >= idle`
-  **or** wall-clock elapsed `>= idle` (suspend backstop) then `lock()` → else `list.Refresh()`.
-- **`lock()`:** run `clearOnLock`, hide all dialogs, `session.Lock(); session=nil`, zero `accounts`,
-  reset selection/list handle, `clearClipboard()`, back to `login()`.
-- **`filter()`:** unselect, rebuild `visible` by case-insensitive name+issuer substring,
-  sort alphabetically (name, then issuer), refresh list, status `"N accounts • path • auto-lock …"`
-  or `"showing X of N • …"` while searching.
-- **`save()`:** `duplicateError()` rejects same name+issuer or same secret-with-identical-settings
-  before `session.Save`; `ErrChanged`/validation surface via `dialog.ShowError`.
-- **`pasteQRImage()`:** `touch()` + stale-session capture, `clipboard.Init()`
-  (OS image clipboard — Fyne's own clipboard is text-only), status
-  "Reading QR image from clipboard…", then background goroutine with 5 s timeout:
-  `clipboard.Read(FmtImage)` (always PNG) → `qrimg.DecodeBytes` → `totp.ParseURI` →
-  `fyne.Do` back to UI thread (abort if `c.session != session`, else `touch()` +
-  `c.save(append(accounts, a))`). Clipboard PNG bytes cleared best-effort after
-  decode; empty clipboard / non-image / QR-less / non-TOTP content each produce a
-  distinct error dialog and save nothing. See `internal/qrimg/qrimg.go` for limits
+- **All writes via `save(accounts)`** → `session.save` → reload accounts → `apply_filter`.
+- **Stale-session guard:** background results are ignored when
+  `session.is_none()` (user locked meanwhile); edit/delete verify the index
+  still holds the same account.
+- **Secrets cleared:** password/secret fields `take()`n before KDF; dialogs
+  drop secrets on close; `lock()` clears clipboard + accounts + selection.
+- **`touch()` discipline:** only explicit actions (typing, selection, button
+  handlers) reset the idle timer. Ticks never do.
+- **`tick()`:** poll background channel → expire clipboard (clear only if OS
+  clipboard still equals copied code/URI) → auto-lock when monotonic **or**
+  wall-clock idle elapsed → else repaint at 500 ms.
+- **`lock()`:** drop session, zero accounts, clear selection/search/clipboard,
+  back to login.
+- **`apply_filter()`:** unselect, rebuild visible by case-insensitive
+  name+issuer substring, sort alphabetically (name, then issuer), refresh status.
+- **`save()`:** `duplicate_error()` rejects same name+issuer or same
+  secret-with-identical-settings before `session.save`.
+- **`paste_qr()`:** `touch()`, status "reading QR…", background thread:
+  `arboard` image → PNG bytes → `qrimg::decode_bytes` → `totp::parse_uri` →
+  back to UI thread (`save(append)`). See `crates/qrimg` limits
   (PNG/JPEG, ≤5 MiB, ≤4000 px/side, ≤16 M px, text ≤8192 chars, single symbol).
-- `theme.go`: Windows-only Segoe UI override (respects explicit `FYNE_FONT`), text size 16;
-  monospace/symbol styles fall through to Fyne default so codes stay monospace.
+- Prefs (`prefs.rs`): non-secret `language` + `theme` (`system/light/dark`) in
+  `TotpVault/prefs.json` under the OS config dir. Never stores secrets.
 
-## 6. QR clipboard import — `internal/qrimg/qrimg.go`
+## 6. QR clipboard import — `crates/qrimg`
 
-Pure offline bridge between image bytes and URI text: `DecodeBytes(data)` enforces
-size limits, `image.DecodeConfig` header pre-check (dimensions/pixels) before the full
-`image.Decode` (PNG/JPEG registered only), then
-`qr.Decode(img)` (single symbol; `piglig/go-qr/v2`, zero runtime deps) and trims +
-length-checks the payload. It deliberately does NOT call `totp.ParseURI` — the UI
-layer does, so non-TOTP QR content (URLs, Wi-Fi, contacts) fails closed at the same
-gate as typed URIs. Tests encode a QR from the public RFC secret and round-trip it,
-plus reject empty / non-image / QR-less / oversize inputs.
+Pure offline bridge between image bytes and URI text: size limits, dimension
+pre-check, full decode (PNG/JPEG via `image`, QR via `rqrr`, single symbol),
+trim + length-check. It deliberately does NOT call `totp::parse_uri` — the UI
+layer does, so non-TOTP QR content fails closed at the same gate as typed URIs.
 
 ## 7. Cross-cutting concerns
 
-- **Concurrency:** one UI thread (Fyne) + one ticker goroutine + short KDF goroutines
-  + short clipboard-read/decode goroutines per paste.
-  All widget mutation funneled through `fyne.Do`. Vault `Session` is not safe for
-  concurrent `Save`; UI serializes via dialog flow + stale-session check.
-- **Errors:** user-facing via inline label (login) or `dialog.ShowError` (main);
-  crypto errors intentionally vague (`ErrAuthentication`); startup/lock contention
-  via modal `ShowError` window.
-- **No network:** `go.mod` = Fyne + `gofrs/flock` + `x/crypto` + `golang.design/x/clipboard`
-  (OS image clipboard, Cgo-free) + `piglig/go-qr/v2` (offline QR decode, zero runtime
-  deps) + `jeandeaual/go-locale` (OS language detect, offline) only. Adding any dialing dependency violates the threat model.
-- **Testing:** `totp_test.go` (18 RFC 6238 vectors, countdown, URI accept/reject, validation edges),
-  `vault_test.go` (round-trip, no-plaintext-on-disk, wrong-pw, O_EXCL, tamper/truncate,
-  nonce-freshness, rotation, stale-write, limits, password policy), `qrimg_test.go` (QR round-trip from RFC
-  secret, non-TOTP QR still decodes but `ParseURI` rejects it, empty/non-image/
-  QR-less/oversize rejection), `i18n_test.go` (all languages cover all keys,
-  format verbs match, fallback, plural rules, error translation),
-  `ui_test.go` + `internal/ui/i18n_test.go` (Fyne test driver:
-  filter, copy, clipboard-expiry, auto-lock, language switch). See `docs/VALIDATION.md`.
-- **Build/release:** native CGO builds per OS (see `AGENTS.md`); `.github/workflows/build.yml`
-  matrix tests/vets/govulnchecks/builds both OS, then on `master`/`v*` packages via
-  `scripts/package_release.py` (magic-check `MZ`/`ELF`, zip/tar.gz + docs, `SHA256SUMS`)
-  and publishes a GitHub Release whose tag must equal `VERSION`.
+- **Concurrency:** one UI thread + short KDF/QR background threads per action.
+  Vault `Session` is serialized through the UI flow + stale-session checks.
+- **Errors:** user-facing via inline label (login) or error window (main);
+  crypto errors intentionally vague (`Authentication`).
+- **No network:** `Cargo.toml` = `eframe` (glow) + `arboard` + `fs2` + `dirs` +
+  `image` + `rqrr` + crypto (`argon2`, `chacha20poly1305`, `hmac`, `sha1/2`) +
+  `sys-locale` only. Adding any dialing dependency violates the threat model.
+- **Testing:** `cargo test --locked` — RFC vectors, countdown, URI
+  accept/reject, validation edges; vault round-trip, no-plaintext-on-disk,
+  wrong-pw, O_EXCL, tamper/truncate, nonce-freshness, rotation, stale-write,
+  limits, password policy, Go interop fixture; QR round-trip + reject paths;
+  i18n key/format/fallback/plural coverage; app filter/dup unit tests.
+- **Build/release:** native builds per OS; `.github/workflows/build.yml`
+  matrix tests/clippy/fmt/audit + release builds all three OS, then on
+  `master`/`v*` packages via `scripts/package_release.py` (magic-check
+  `MZ`/`ELF`/`Mach-O`, zip/tar.gz + docs, `SHA256SUMS`) and publishes a GitHub
+  Release whose tag must equal `VERSION`.

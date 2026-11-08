@@ -9,50 +9,44 @@ permissions:
   contents: read
 jobs:
   build:
-    env:
-      GOFLAGS: -trimpath
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest]
+        include:
+          - os: ubuntu-24.04
+            artifact: totpvault-Linux-amd64
+          - os: windows-latest
+            artifact: totpvault-Windows-amd64
+          - os: macos-latest
+            artifact: totpvault-macOS-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          go-version: '1.27.x'
-          cache: true
-          cache-dependency-path: |
-            go.sum
-            .github/workflows/build.yml
-      - name: Linux development libraries
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux GUI libraries (eframe)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y gcc pkg-config libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
-      - name: Go dependencies
-        run: go mod download
-      - name: Verify dependencies
-        run: go mod verify
-      - name: Tests with race detector
-        run: go test -race ./...
+        run: sudo apt-get update && sudo apt-get install -y gcc pkg-config libgl1-mesa-dev libegl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+      - name: Format check
+        run: cargo fmt --check
+      - name: Tests
+        run: cargo test --locked
       - name: Static checks
-        run: go vet -v ./...
-      - name: Check reachable vulnerabilities
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Vulnerability audit
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
-          govulncheck ./...
-      - name: Build Linux
-        if: runner.os == 'Linux'
-        run: go build -v -trimpath -ldflags="-s -w" -o dist/totpvault ./cmd/totpvault
-      - name: Build Windows
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          set CGO_ENABLED=1
-          go build -v -trimpath -ldflags="-s -w -H=windowsgui" -o dist\totpvault.exe ./cmd/totpvault
+          cargo install cargo-audit --locked
+          cargo audit
+      - name: Release build
+        run: cargo build --locked --release -p totpvault
       - uses: actions/upload-artifact@v4
         with:
-          name: totpvault-${{ runner.os }}-amd64
-          path: dist/totpvault*
+          name: ${{ matrix.artifact }}
+          path: |
+            target/release/totpvault
+            target/release/totpvault.exe
           if-no-files-found: error
   release:
     name: Publish GitHub Release
@@ -94,12 +88,12 @@ jobs:
       - uses: actions/download-artifact@v4
         if: steps.version.outputs.publish == 'true'
         with:
-          pattern: totpvault-*-amd64
+          pattern: totpvault-*
           path: release-input
       - name: Package binaries and checksums
         if: steps.version.outputs.publish == 'true'
         run: python3 scripts/package_release.py release-input release-assets
-      - name: Publish release with both platforms
+      - name: Publish release with all platforms
         if: steps.version.outputs.publish == 'true'
         shell: bash
         env:
@@ -107,11 +101,14 @@ jobs:
         run: |
           set -euo pipefail
           cat > release-notes.md <<'NOTES'
-          Offline TOTP authenticator for Windows and Linux (x86-64).
+          Offline TOTP authenticator for Windows, Linux and macOS (x86-64 + Apple Silicon).
 
           - **Windows:** extract the Windows ZIP and run `totpvault.exe`.
           - **Linux:** extract the Linux tar.gz and run `./totpvault` on an OpenGL-capable desktop.
-          - `SHA256SUMS` contains checksums for both downloads.
+          - **macOS:** extract the macOS tar.gz (Apple Silicon) and run `./totpvault`.
+          - `SHA256SUMS` contains checksums for all downloads.
+
+          Vault format v1 is unchanged: v1 vaults open directly in v2. Rust rewrite (egui) of the former Go/Fyne app (archived in `archived/go/`).
 
           The archives include the license, usage instructions and security notes.
           NOTES
