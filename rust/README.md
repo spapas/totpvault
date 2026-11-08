@@ -46,7 +46,8 @@ dev libs for `eframe`, same class of deps as Fyne).
 - No embedded tray icon yet (Go embeds `icon.svg`).
 - `cargo audit` replaces `govulncheck` in CI: **0 vulnerabilities** (2026-11-07;
   only 4 unmaintained warnings on transitive Linux D-Bus crates).
-- Release binary builds (`cargo build --release -p totpvault-rs`, ~16 MB) and
+- Release binary builds (`cargo build --release -p totpvault-rs`, ~7 MB,
+  `windows_subsystem`, stripped + LTO + `opt-level="z"`) and
   the GUI launches and runs (20 s smoke test, lock file held, no crash).
 - Manual GUI walkthrough per `docs/VALIDATION.md` is still pending for this port.
 

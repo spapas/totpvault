@@ -1,3 +1,10 @@
 [workspace]
 members = ["crates/totp", "crates/vault", "crates/qrimg", "crates/i18n", "app"]
 resolver = "2"
+
+[profile.release]
+# Small binary: size-optimized, single codegen unit, fat LTO, stripped.
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

@@ -109,6 +109,7 @@ struct LoginState {
     confirm: String,
     message: String,
     busy: bool,
+    focused: bool,
 }
 
 #[derive(Default)]
@@ -440,6 +441,7 @@ impl TotpApp {
                 Bg::Kdf(Err(e)) => {
                     if self.screen == Screen::Login {
                         self.login.busy = false;
+                        self.login.focused = false; // refocus the password field
                         self.login.message = self.err_text(&e);
                     }
                 }
@@ -532,10 +534,13 @@ fn load_font_file(path: &std::path::Path) -> Option<Vec<u8>> {
 }
 
 fn install_fonts(ctx: &egui::Context) {
+    // System UI fonts first (native look), egui's embedded fonts stay as
+    // fallback. CJK and other scripts are served on demand by the
+    // `system_fonts` provider (memory-mapped, not copied into RAM), so we
+    // deliberately do NOT preload the ~16 MB msyh.ttc here.
     let mut defs = egui::FontDefinitions::default();
     let mut prop_first: Vec<String> = Vec::new();
     let mut mono_first: Vec<String> = Vec::new();
-    let mut fallback: Vec<String> = Vec::new();
 
     if let Ok(windir) = std::env::var("WINDIR") {
         let fonts = std::path::Path::new(&windir).join("Fonts");
@@ -554,37 +559,17 @@ fn install_fonts(ctx: &egui::Context) {
                 }
             }
         }
-        // CJK fallback (last resort, keeps the Chinese UI readable).
-        for file in ["msyh.ttc", "msyh.ttf"] {
-            if let Some(bytes) = load_font_file(&fonts.join(file)) {
+        // CJK and other scripts are served on demand by the `system_fonts`
+        // provider (memory-mapped, not copied into RAM): no preload here.
+    } else {
+        // Linux: Noto Sans as the native-ish proportional font.
+        for file in ["/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"] {
+            if let Some(bytes) = load_font_file(std::path::Path::new(file)) {
                 defs.font_data.insert(
-                    "system-cjk".to_string(),
+                    "noto-sans".to_string(),
                     egui::FontData::from_owned(bytes).into(),
                 );
-                fallback.push("system-cjk".to_string());
-                break;
-            }
-        }
-    } else {
-        // Linux: Noto Sans as the native-ish proportional font, CJK after it.
-        for file in [
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        ] {
-            if let Some(bytes) = load_font_file(std::path::Path::new(file)) {
-                let name = if file.contains("CJK") {
-                    "system-cjk"
-                } else {
-                    "noto-sans"
-                };
-                defs.font_data
-                    .insert(name.to_string(), egui::FontData::from_owned(bytes).into());
-                if file.contains("CJK") {
-                    fallback.push(name.to_string());
-                } else {
-                    prop_first.push(name.to_string());
-                }
+                prop_first.push("noto-sans".to_string());
             }
         }
     }
@@ -597,7 +582,6 @@ fn install_fonts(ctx: &egui::Context) {
         if let Some(existing) = defs.families.get(&fam) {
             chain.extend(existing.iter().cloned());
         }
-        chain.extend(fallback.iter().cloned());
         defs.families.insert(fam, chain);
     }
     ctx.set_fonts(defs);
@@ -804,16 +788,12 @@ impl eframe::App for TotpApp {
         // no text field or dialog owns the keystroke, a Copy event means the
         // user hit the copy shortcut: copy the selected code, like Go does.
         ui.ctx().input(|i| {
-            if no_dialog
-                && !wants_kb
-                && i.events.iter().any(|e| matches!(e, egui::Event::Copy))
-            {
+            if no_dialog && !wants_kb && i.events.iter().any(|e| matches!(e, egui::Event::Copy)) {
                 want_copy = true;
             }
         });
         ui.input_mut(|i| {
-            if no_dialog && !wants_kb && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-            {
+            if no_dialog && !wants_kb && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
                 want_copy = true;
             }
         });
@@ -855,8 +835,16 @@ impl TotpApp {
                     return;
                 }
                 let ph_hint = self.t("login.ph_master", &[]);
+                if !self.login.focused {
+                    // Focus the password field on arrival, like Go's Canvas().Focus.
+                    self.login.focused = true;
+                    ui.memory_mut(|m| {
+                        m.request_focus(egui::Id::new("login-password"));
+                    });
+                }
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut self.login.password)
+                        .id(egui::Id::new("login-password"))
                         .password(true)
                         .hint_text(ph_hint)
                         .desired_width(300.0),
