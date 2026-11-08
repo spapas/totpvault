@@ -384,10 +384,10 @@ fn err_key(msg: &str) -> Option<(String, Vec<Arg>)> {
             return Some((key.to_string(), vec![Arg::Str(inner)]));
         }
     }
-    if let Some(rest) = msg.strip_prefix("duplicate ") {
-        if let Some(param) = rest.strip_suffix(" parameter") {
-            return Some(("err.uri_dup".to_string(), vec![Arg::Str(param.to_string())]));
-        }
+    if let Some(rest) = msg.strip_prefix("duplicate ")
+        && let Some(param) = rest.strip_suffix(" parameter")
+    {
+        return Some(("err.uri_dup".to_string(), vec![Arg::Str(param.to_string())]));
     }
     if let Some(param) = msg.strip_prefix("unsupported parameter: ") {
         return Some((

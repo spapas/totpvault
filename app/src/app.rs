@@ -302,12 +302,11 @@ impl TotpApp {
     }
 
     fn clear_clipboard(&mut self) {
-        if !self.clipboard.is_empty() {
-            if let Ok(mut cb) = arboard::Clipboard::new() {
-                if matches!(cb.get_text(), Ok(t) if t == self.clipboard) {
-                    let _ = cb.set_text("");
-                }
-            }
+        if !self.clipboard.is_empty()
+            && let Ok(mut cb) = arboard::Clipboard::new()
+            && matches!(cb.get_text(), Ok(t) if t == self.clipboard)
+        {
+            let _ = cb.set_text("");
         }
         self.clipboard.clear();
         self.clipboard_until = None;
@@ -512,10 +511,10 @@ impl TotpApp {
     fn tick(&mut self) {
         self.poll_bg();
         let now = Instant::now();
-        if let Some(until) = self.clipboard_until {
-            if now >= until {
-                self.clear_clipboard();
-            }
+        if let Some(until) = self.clipboard_until
+            && now >= until
+        {
+            self.clear_clipboard();
         }
         if self.session.is_some() {
             let idle = Duration::from_secs(self.idle_minutes * 60);
@@ -1441,18 +1440,20 @@ impl TotpApp {
                     if self.session.is_none() {
                         // locked meanwhile: abort.
                     } else {
+                        if (!f.new_pw.is_empty() || !f.repeat_pw.is_empty())
+                            && f.new_pw != f.repeat_pw
+                        {
+                            self.show_err(self.t("settings.err_mismatch", &[]));
+                            self.dialog = Dialog::Settings(f);
+                            return;
+                        }
                         if !f.new_pw.is_empty() || !f.repeat_pw.is_empty() {
-                            if f.new_pw != f.repeat_pw {
-                                self.show_err(self.t("settings.err_mismatch", &[]));
-                                self.dialog = Dialog::Settings(f);
+                            if let Some(sess) = self.session.as_mut()
+                                && let Err(e) = sess.change_password(&f.new_pw)
+                            {
+                                let msg = self.err_text(&e.to_string());
+                                self.dialog = Dialog::Error(msg);
                                 return;
-                            }
-                            if let Some(sess) = self.session.as_mut() {
-                                if let Err(e) = sess.change_password(&f.new_pw) {
-                                    let msg = self.err_text(&e.to_string());
-                                    self.dialog = Dialog::Error(msg);
-                                    return;
-                                }
                             }
                         }
                         match f.idle.parse::<u64>() {
@@ -1465,11 +1466,11 @@ impl TotpApp {
                         }
                         self.hide_codes = f.hide;
                         let tags = i18n::supported();
-                        if let Some(tag) = tags.get(f.lang_idx) {
-                            if *tag != self.lang {
-                                self.lang = tag.to_string();
-                                crate::prefs::save_language(tag);
-                            }
+                        if let Some(tag) = tags.get(f.lang_idx)
+                            && *tag != self.lang
+                        {
+                            self.lang = tag.to_string();
+                            crate::prefs::save_language(tag);
                         }
                         let new_theme = match f.theme_idx {
                             1 => ThemeMode::Light,
