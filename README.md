@@ -4,11 +4,8 @@ A small offline authenticator for Windows, Linux and macOS, written in Rust with
 
 ## Screenshots
 
-![Main window with accounts, two-row toolbar and live codes](docs/screenshots/main.png)
+![Main window with account cards, live codes and countdown rings](docs/screenshots/main.png)
 ![Unlock screen with master password prompt](docs/screenshots/login.png)
-
-Screenshots are from the 1.x Go/Fyne UI; the 2.0 Rust UI keeps the same
-workflow with account cards, countdown rings and a teal theme.
 
 ## Features
 
