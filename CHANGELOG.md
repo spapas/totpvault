@@ -5,6 +5,17 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-15
+
+### Added
+
+- Export shows the provisioning URI as an offline QR code for phone scanning.
+- Backup vault (`⋯` → Backup vault) copies the encrypted file as-is; every save also keeps a best-effort `<vault>.bak` of the previous ciphertext.
+- Pins (★) keep accounts on top; optional copy-on-select; per-session font size, compact rows and high contrast.
+- Optional lock on window focus loss; password-strength meter; Caps Lock warning on login; backwards-clock warning.
+- Selected account shows its next-period code.
+- Optional system-tray icon (Settings): left-click shows/hides, menu for Show/Lock/Quit; closing the window hides to tray instead of quitting.
+
 ## [2.0.0] - 2026-11-08
 
 ### Changed

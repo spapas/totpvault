@@ -136,15 +136,17 @@ errors — translation never alters validation.
   "Deriving encryption key…", derives Argon2id in a background thread, then
   back to the UI thread: error → message; success → main screen.
 - Main — search entry + toolbar (Add / Copy / Edit / Delete / Export + ⋯ menu
-  for Import / Paste QR / Settings / About / Lock) + scrollable account cards.
+  for Import / Paste QR / Backup / Settings / About / Lock) + scrollable account cards.
   Cards: avatar (issuer initial), name + issuer, monospace code + countdown
   ring (red at ≤5 s). Click selects, double-click copies. Enter / Ctrl+C
   copies the selected code when no text field or dialog owns the keystroke.
 - Dialogs: account add/edit (validates via `normalize`; edit verifies the
   index still holds the same account), import URI (`parse_uri`), export
-  confirm (copies URI, 15 s expiry), delete confirm, settings (idle 1/2/5/10/
-  15 min + hide-codes + theme + language + optional password change), about
-  (vault path, backup reminder, clock note).
+  confirm (copies URI, 15 s expiry) + offline QR display, backup (copies the
+  encrypted file as-is), delete confirm, settings (idle 1/2/5/10/15 min +
+  hide-codes + lock-on-focus + copy-on-select + compact + contrast + tray +
+  font + theme + language + optional password change), about
+  (vault path, backup reminder, clock note, shortcuts).
 
 ### 5.2 Invariants
 

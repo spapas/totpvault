@@ -69,3 +69,21 @@ Rust 1.99.1 windows/x86_64-msvc, after the `2.0.0` bump (Go archived).
   `Mach-O` magic and produces Windows ZIP + Linux/macOS tar.gz + `SHA256SUMS`.
 - Manual GUI walkthrough of the Rust UI per this file is still pending; the
   workflow (add/import/QR/copy/lock/settings/about) mirrors 1.x.
+
+## 3.0.0 — 15 November 2026 (Europe/Athens)
+
+Rust 1.99.1 windows/x86_64-msvc, after the `3.0.0` bump (vault format v1 unchanged).
+
+- `cargo test --locked`: passed, all crates (15 app tests incl. QR render,
+  strength, pins, backup round-trip, clock, font, tray icon/close-to-tray;
+  6 i18n incl. new-key coverage; totp/vault/qrimg suites incl. Go interop).
+- `cargo fmt --check` / `cargo clippy --all-targets --locked -- -D warnings`:
+  passed locally on Windows; repeated by CI on all three platforms.
+- `cargo audit`: no vulnerabilities (3 pre-existing unmaintained warnings:
+  `zbus_names`/`zvariant`/`zvariant_derive`).
+- New UI surface since 2.0.0 (export QR, backup + auto-`.bak`, pins,
+  copy-on-select, font/compact/contrast, focus-lock, strength meter,
+  Caps-Lock warning, clock warning, next-code preview, tray icon) is covered
+  by unit tests for the pure helpers; manual desktop walkthrough (tray
+  show/hide/quit on Windows/Linux/macOS, QR scan, backup restore) is pending
+  and should be done against the release binaries.

@@ -6,6 +6,7 @@
 //! verify the account index still holds the same account; only explicit
 //! actions (typing, selection, buttons) reset the idle timer.
 
+use std::collections::HashSet;
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -28,6 +29,207 @@ fn spaced(code: &str) -> String {
         8 => format!("{} {}", &code[..4], &code[4..]),
         _ => code.to_string(),
     }
+}
+
+/// Offline QR encode for the export dialog: validated `otpauth://` URI bytes
+/// -> grayscale modules -> `egui::ColorImage`. Fails closed when the payload
+/// does not fit a single QR symbol (some long but valid URIs exceed QR
+/// capacity); callers show the error instead of saving anything.
+fn qr_color_image(uri: &str) -> Result<egui::ColorImage, String> {
+    let code =
+        qrcode::QrCode::new(uri.as_bytes()).map_err(|e| format!("could not render QR: {e}"))?;
+    // 360px box keeps one dialog readable without DPR-dependent scaling.
+    let img = code
+        .render::<image::Luma<u8>>()
+        .max_dimensions(360, 360)
+        .quiet_zone(true)
+        .build();
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    if w == 0 || h == 0 || w > 2000 || h > 2000 {
+        return Err("could not render QR".to_string());
+    }
+    Ok(egui::ColorImage::from_gray(
+        [w, h],
+        img.into_raw().as_slice(),
+    ))
+}
+
+/// Password strength 0–4 (offline heuristic, no network): one point each for
+/// 12+ chars (runes), mixed case, a digit, a non-alphanumeric. Pure.
+pub fn password_strength(pw: &str) -> u8 {
+    let runes = pw.chars().count();
+    let mut score = 0u8;
+    if runes >= 12 {
+        score += 1;
+    }
+    let (mut lower, mut upper, mut digit, mut symbol) = (false, false, false, false);
+    for c in pw.chars() {
+        if c.is_ascii_lowercase() {
+            lower = true;
+        } else if c.is_ascii_uppercase() {
+            upper = true;
+        } else if c.is_ascii_digit() {
+            digit = true;
+        } else if !c.is_alphanumeric() {
+            symbol = true;
+        } else {
+            // Non-ASCII alphanumeric: counts as a class on its own.
+            symbol = true;
+        }
+    }
+    if lower && upper {
+        score += 1;
+    }
+    if digit {
+        score += 1;
+    }
+    if symbol {
+        score += 1;
+    }
+    score.min(4)
+}
+
+/// Stable pin key: lowercase trimmed `name\0issuer`. Pure.
+pub fn pin_key(name: &str, issuer: &str) -> String {
+    format!(
+        "{}\x00{}",
+        name.trim().to_lowercase(),
+        issuer.trim().to_lowercase()
+    )
+}
+
+/// Pinned accounts first, alphabetical order preserved inside each group.
+/// `visible` must already be sorted by [`filter`]. Pure.
+pub fn order_pinned(
+    accounts: &[totp::Account],
+    visible: &[usize],
+    pinned: &HashSet<String>,
+) -> Vec<usize> {
+    let mut pin = Vec::new();
+    let mut rest = Vec::new();
+    for &i in visible {
+        let a = &accounts[i];
+        if pinned.contains(&pin_key(&a.name, &a.issuer)) {
+            pin.push(i);
+        } else {
+            rest.push(i);
+        }
+    }
+    pin.extend(rest);
+    pin
+}
+
+/// Default backup destination: `<vault>.bak`. Pure.
+pub fn backup_dest_default(vault_path: &str) -> String {
+    format!("{vault_path}.bak")
+}
+
+/// True when the wall clock jumped clearly backwards (codes may be wrong).
+/// Pure: both inputs are Unix seconds, 0 = unknown clock.
+pub fn clock_went_backwards(prev_wall: i64, now_wall: i64) -> bool {
+    prev_wall > 0 && now_wall > 0 && now_wall + 60 < prev_wall
+}
+
+/// Per-session font scale steps used by Settings. Pure.
+pub fn font_scale_from_idx(idx: usize) -> f32 {
+    match idx {
+        0 => 0.9,
+        2 => 1.15,
+        3 => 1.3,
+        _ => 1.0,
+    }
+}
+
+pub fn font_idx_from_scale(scale: f32) -> usize {
+    if (scale - 0.9).abs() < 0.01 {
+        0
+    } else if (scale - 1.15).abs() < 0.01 {
+        2
+    } else if (scale - 1.3).abs() < 0.01 {
+        3
+    } else {
+        1
+    }
+}
+
+/// True while Caps Lock is engaged. Windows-only via direct user32 import
+/// (no new dependency, OS API only); other platforms return false, where the
+/// login screen simply omits the warning. Pure query, no I/O.
+#[cfg(windows)]
+fn caps_lock_on() -> bool {
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetKeyState(n_virt_key: i32) -> i16;
+    }
+    const VK_CAPITAL: i32 = 0x14;
+    unsafe { GetKeyState(VK_CAPITAL) & 1 == 1 }
+}
+
+#[cfg(not(windows))]
+fn caps_lock_on() -> bool {
+    false
+}
+
+/// Code of the *next* period, shown only for the selected account so extra
+/// HMAC work stays O(1) per tick. Pure.
+pub fn next_code_text(account: &totp::Account, now: i64) -> Option<String> {
+    if account.period < 1 || now < 0 {
+        return None;
+    }
+    let cur = now.div_euclid(account.period);
+    let t = cur.saturating_add(1).saturating_mul(account.period);
+    totp::code(account, t).ok().map(|(c, _)| spaced(&c))
+}
+
+/// Copy the encrypted vault file as-is (manual Backup dialog and the
+/// best-effort auto-`.bak` share this one path). No crypto here. Pure I/O.
+pub fn backup_vault_file(src: &str, dest: &str) -> std::io::Result<u64> {
+    std::fs::copy(src, dest)
+}
+
+/// 32x32 RGBA padlock for the tray: transparent rounded square, teal base,
+/// white shackle + body, dark keyhole. Pure.
+pub fn tray_icon_rgba() -> (Vec<u8>, u32, u32) {
+    const S: u32 = 32;
+    const TEAL: [u8; 4] = [13, 148, 136, 255];
+    const WHITE: [u8; 4] = [255, 255, 255, 255];
+    const DARK: [u8; 4] = [10, 110, 100, 255];
+    let mut px = vec![0u8; (S * S * 4) as usize];
+    for y in 0..S {
+        for x in 0..S {
+            // Rounded-square mask, radius 7 on a 32px box.
+            let dx = ((x as i32 - 16).abs() - 9).max(0) as f32;
+            let dy = ((y as i32 - 16).abs() - 9).max(0) as f32;
+            if dx * dx + dy * dy > 49.0 {
+                continue; // transparent corner
+            }
+            let mut c = TEAL;
+            // Shackle ring, center (16,13), r 5.5, upper part only.
+            let sx = x as f32 - 16.0;
+            let sy = y as f32 - 13.0;
+            if ((sx * sx + sy * sy).sqrt() - 5.5).abs() <= 1.4 && y <= 14 {
+                c = WHITE;
+            }
+            // Body x 10..22, y 14..26.
+            if (10..22).contains(&x) && (14..26).contains(&y) {
+                c = WHITE;
+            }
+            // Keyhole: dot (16,19) r 2 + slot x 16, y 20..25.
+            let kx = x as f32 - 16.0;
+            let ky = y as f32 - 19.0;
+            if (kx * kx + ky * ky).sqrt() <= 2.0 || (x == 16 && (20..25).contains(&y)) {
+                c = DARK;
+            }
+            let i = ((y * S + x) * 4) as usize;
+            px[i..i + 4].copy_from_slice(&c);
+        }
+    }
+    (px, S, S)
+}
+
+/// Close-to-tray interception: hide instead of quitting. Pure.
+pub fn should_hide_on_close(tray_enabled: bool, close_requested: bool, allow_close: bool) -> bool {
+    tray_enabled && close_requested && !allow_close
 }
 
 /// Case-insensitive name+issuer substring filter, sorted by (name, issuer).
@@ -95,6 +297,15 @@ enum Bg {
     Qr(Result<totp::Account, String>),
 }
 
+/// System-tray handles. The icon must stay alive while shown; menu items are
+/// kept for id matching and label refresh on language change.
+struct TrayState {
+    _icon: tray_icon::TrayIcon,
+    show: tray_icon::menu::MenuItem,
+    lock: tray_icon::menu::MenuItem,
+    quit: tray_icon::menu::MenuItem,
+}
+
 #[derive(PartialEq, Eq)]
 enum Screen {
     Login,
@@ -129,6 +340,12 @@ struct AccountForm {
 struct SettingsForm {
     idle: String,
     hide: bool,
+    lock_focus: bool,
+    copy_select: bool,
+    compact: bool,
+    contrast: bool,
+    tray: bool,
+    font_idx: usize,
     lang_idx: usize,
     theme_idx: usize,
     new_pw: String,
@@ -140,6 +357,8 @@ enum Dialog {
     Account(AccountForm),
     Import(String),
     ExportConfirm { uri: String },
+    ExportQr { uri: String },
+    Backup(String),
     DeleteConfirm { index: usize, label: String },
     Settings(SettingsForm),
     About,
@@ -200,6 +419,12 @@ pub struct TotpApp {
     status: String,
     idle_minutes: u64,
     hide_codes: bool,
+    lock_on_focus: bool,
+    copy_on_select: bool,
+    compact: bool,
+    high_contrast: bool,
+    font_scale: f32,
+    pinned: HashSet<String>,
     clipboard: String,
     clipboard_until: Option<Instant>,
     last_activity: Instant,
@@ -207,6 +432,12 @@ pub struct TotpApp {
     dialog: Dialog,
     bg_rx: Option<Receiver<Bg>>,
     qr_reading: bool,
+    qr_tex_uri: String,
+    qr_tex: Option<egui::TextureHandle>,
+    tray_enabled: bool,
+    tray: Option<TrayState>,
+    window_visible: bool,
+    allow_close: bool,
 }
 
 impl TotpApp {
@@ -218,7 +449,7 @@ impl TotpApp {
     ) -> Self {
         install_fonts(&cc.egui_ctx);
         let dark = theme_mode.resolve();
-        apply_theme(&cc.egui_ctx, dark);
+        apply_theme(&cc.egui_ctx, dark, false);
         let mut app = Self {
             path,
             lang,
@@ -234,6 +465,12 @@ impl TotpApp {
             status: String::new(),
             idle_minutes: 5,
             hide_codes: false,
+            lock_on_focus: false,
+            copy_on_select: false,
+            compact: false,
+            high_contrast: false,
+            font_scale: 1.0,
+            pinned: HashSet::new(),
             clipboard: String::new(),
             clipboard_until: None,
             last_activity: Instant::now(),
@@ -241,6 +478,12 @@ impl TotpApp {
             dialog: Dialog::None,
             bg_rx: None,
             qr_reading: false,
+            qr_tex_uri: String::new(),
+            qr_tex: None,
+            tray_enabled: false,
+            tray: None,
+            window_visible: true,
+            allow_close: false,
         };
         app.refresh_login_mode();
         app
@@ -294,8 +537,11 @@ impl TotpApp {
         self.visible.clear();
         self.selected = None;
         self.search.clear();
+        self.pinned.clear();
         self.bg_rx = None;
         self.qr_reading = false;
+        self.qr_tex = None;
+        self.qr_tex_uri.clear();
         self.clear_clipboard();
         self.screen = Screen::Login;
         self.refresh_login_mode();
@@ -314,7 +560,7 @@ impl TotpApp {
 
     fn apply_filter(&mut self) {
         self.selected = None;
-        self.visible = filter(&self.accounts, &self.search);
+        self.reorder_visible();
         let idle = self.idle_str();
         if self.search.trim().is_empty() {
             let n = self.accounts.len() as i64;
@@ -336,7 +582,20 @@ impl TotpApp {
         }
     }
 
+    /// Rebuild `visible` from the current filter without dropping selection
+    /// (used after pin toggles). Status text is left untouched.
+    fn reorder_visible(&mut self) {
+        let base = filter(&self.accounts, &self.search);
+        self.visible = order_pinned(&self.accounts, &base, &self.pinned);
+    }
+
     fn save(&mut self, accounts: Vec<totp::Account>) -> bool {
+        // Best-effort auto-`.bak` of the previous ciphertext before every
+        // overwrite (same bytes, same password). Never blocks the save.
+        let bak_src = self.path.clone();
+        if std::path::Path::new(&bak_src).exists() {
+            let _ = backup_vault_file(&bak_src, &backup_dest_default(&bak_src));
+        }
         let Some(sess) = self.session.as_mut() else {
             return false;
         };
@@ -508,6 +767,111 @@ impl TotpApp {
         });
     }
 
+    fn ensure_tray(&mut self) -> Result<(), String> {
+        let (rgba, w, h) = tray_icon_rgba();
+        let icon = tray_icon::Icon::from_rgba(rgba, w, h).map_err(|e| format!("tray icon: {e}"))?;
+        let menu = tray_icon::menu::Menu::new();
+        let show = tray_icon::menu::MenuItem::new(self.t("tray.show", &[]), true, None);
+        let lock = tray_icon::menu::MenuItem::new(self.t("btn.lock", &[]), true, None);
+        let quit = tray_icon::menu::MenuItem::new(self.t("btn.quit", &[]), true, None);
+        menu.append_items(&[&show, &lock, &quit])
+            .map_err(|e| format!("tray menu: {e}"))?;
+        let handle = tray_icon::TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_tooltip("TOTP Vault")
+            .with_icon(icon)
+            .build()
+            .map_err(|e| format!("system tray unavailable: {e}"))?;
+        self.tray = Some(TrayState {
+            _icon: handle,
+            show,
+            lock,
+            quit,
+        });
+        Ok(())
+    }
+
+    fn refresh_tray_texts(&self) {
+        if let Some(t) = &self.tray {
+            t.show.set_text(self.t("tray.show", &[]));
+            t.lock.set_text(self.t("btn.lock", &[]));
+            t.quit.set_text(self.t("btn.quit", &[]));
+        }
+    }
+
+    fn toggle_window(&mut self, ui: &mut egui::Ui) {
+        self.touch();
+        self.window_visible = !self.window_visible;
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::Visible(self.window_visible));
+        if self.window_visible {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+    }
+
+    /// Tray icon lifecycle + menu/click events, polled every repaint (500ms).
+    /// Runs on the UI thread, like everything else in `TotpApp`.
+    fn poll_tray(&mut self, ui: &mut egui::Ui) {
+        // Close-to-tray: hide instead of quitting, when enabled.
+        if should_hide_on_close(
+            self.tray_enabled,
+            ui.ctx().input(|i| i.viewport().close_requested()),
+            self.allow_close,
+        ) {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            self.window_visible = false;
+            return;
+        }
+        if !self.tray_enabled {
+            return;
+        }
+        if self.tray.is_none()
+            && let Err(e) = self.ensure_tray()
+        {
+            // No tray on this desktop (e.g. GNOME without the AppIndicator
+            // extension, headless/CI): fall back to plain window mode, once.
+            self.tray_enabled = false;
+            self.status = self.t("tray.unavailable", &[]);
+            self.show_err(e);
+            return;
+        }
+        while let Ok(ev) = tray_icon::TrayIconEvent::receiver().try_recv() {
+            // Single toggle per click: press (Down) and release (Up) arrive
+            // as separate events on some backends; KSNI sends Up only.
+            if matches!(
+                ev,
+                tray_icon::TrayIconEvent::Click {
+                    button: tray_icon::MouseButton::Left,
+                    button_state: tray_icon::MouseButtonState::Up,
+                    ..
+                }
+            ) {
+                self.toggle_window(ui);
+            }
+        }
+        while let Ok(ev) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+            let (show_id, lock_id, quit_id) = match &self.tray {
+                Some(t) => (t.show.id(), t.lock.id(), t.quit.id()),
+                None => continue,
+            };
+            if ev.id == show_id {
+                self.toggle_window(ui);
+            } else if ev.id == lock_id {
+                self.touch();
+                self.lock();
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                self.window_visible = true;
+            } else if ev.id == quit_id {
+                self.allow_close = true;
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
     fn tick(&mut self) {
         self.poll_bg();
         let now = Instant::now();
@@ -517,6 +881,14 @@ impl TotpApp {
             self.clear_clipboard();
         }
         if self.session.is_some() {
+            // Offline clock-jump guard: a backwards jump means TOTP codes are
+            // likely wrong. Warn once and re-baseline; never touch() here so
+            // the idle timer keeps working (see touch() discipline).
+            let now_w = now_unix();
+            if clock_went_backwards(self.last_wall, now_w) {
+                self.last_wall = now_w;
+                self.status = self.t("status.clock_warn", &[]);
+            }
             let idle = Duration::from_secs(self.idle_minutes * 60);
             let wall_elapsed = now_unix() - self.last_wall;
             if now.duration_since(self.last_activity) >= idle
@@ -591,8 +963,9 @@ pub const ACCENT_DARK: egui::Color32 = egui::Color32::from_rgb(45, 212, 191);
 pub const DANGER: egui::Color32 = egui::Color32::from_rgb(220, 60, 60);
 
 /// Refined theme on top of the egui light/dark base: teal accent, rounded
-/// controls, comfortable type sizes.
-fn apply_theme(ctx: &egui::Context, dark: bool) {
+/// controls, comfortable type sizes. `hc` is the optional high-contrast
+/// override (pure black/white text, maximum-contrast selection).
+fn apply_theme(ctx: &egui::Context, dark: bool, hc: bool) {
     let mut style = (*ctx.global_style()).clone();
     let mut visuals = if dark {
         egui::Visuals::dark()
@@ -603,6 +976,23 @@ fn apply_theme(ctx: &egui::Context, dark: bool) {
     visuals.selection.bg_fill = accent;
     visuals.selection.stroke.color = egui::Color32::WHITE;
     visuals.hyperlink_color = accent;
+    if hc {
+        visuals.override_text_color = Some(if dark {
+            egui::Color32::WHITE
+        } else {
+            egui::Color32::BLACK
+        });
+        visuals.selection.bg_fill = if dark {
+            egui::Color32::YELLOW
+        } else {
+            egui::Color32::BLUE
+        };
+        visuals.selection.stroke.color = if dark {
+            egui::Color32::BLACK
+        } else {
+            egui::Color32::WHITE
+        };
+    }
     for w in [
         &mut visuals.widgets.noninteractive,
         &mut visuals.widgets.inactive,
@@ -771,11 +1161,21 @@ impl eframe::App for TotpApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.tick();
         ui.ctx().request_repaint_after(Duration::from_millis(500));
+        ui.ctx().set_pixels_per_point(self.font_scale);
 
         if self.screen == Screen::Login {
             self.show_login(ui);
             return;
         }
+        // Optional per-session hardening: lock as soon as the window loses
+        // focus (e.g. Alt+Tab). Checked here — not in tick() — so it reacts
+        // within one repaint without disturbing the idle timer.
+        let focus_lost = ui.ctx().input(|i| i.viewport().focused == Some(false));
+        if self.lock_on_focus && self.session.is_some() && focus_lost {
+            self.lock();
+            return;
+        }
+        self.poll_tray(ui);
         // Shortcuts: Enter / Ctrl+C copy the selected code when no text field
         // or dialog consumes the keystroke.
         let mut want_copy = false;
@@ -857,6 +1257,11 @@ impl TotpApp {
                     );
                     ui.label(self.t("login.hint1", &[]));
                     ui.label(self.t("login.hint2", &[]));
+                    let s = password_strength(&self.login.password);
+                    ui.label(self.t("pw.strength", &[i64::from(s).into()]));
+                }
+                if !self.login.password.is_empty() && caps_lock_on() {
+                    ui.label(self.t("login.caps", &[]));
                 }
                 ui.add_enabled_ui(!self.login.busy, |ui| {
                     let accent = if self.dark { ACCENT_DARK } else { ACCENT_LIGHT };
@@ -892,6 +1297,7 @@ impl TotpApp {
         let mut export = false;
         let mut import = false;
         let mut paste_qr = false;
+        let mut backup = false;
         let mut settings = false;
         let mut about = false;
         let mut lock = false;
@@ -968,6 +1374,10 @@ impl TotpApp {
                         paste_qr = true;
                         ui.close();
                     }
+                    if ui.button(self.t("btn.backup", &[])).clicked() {
+                        backup = true;
+                        ui.close();
+                    }
                     if ui.button(self.t("btn.settings", &[])).clicked() {
                         settings = true;
                         ui.close();
@@ -992,9 +1402,11 @@ impl TotpApp {
                 let accent = if self.dark { ACCENT_DARK } else { ACCENT_LIGHT };
                 let mut clicked: Option<usize> = None;
                 let mut double_clicked: Option<usize> = None;
+                let mut toggle_pin: Option<usize> = None;
                 for &ai in &self.visible.clone() {
                     let a = &self.accounts[ai];
                     let is_sel = self.selected == Some(ai);
+                    let is_pin = self.pinned.contains(&pin_key(&a.name, &a.issuer));
                     let (code_txt, rem) = if self.hide_codes && !is_sel {
                         ("••• •••".to_string(), (a.period - now % a.period) as f32)
                     } else {
@@ -1004,15 +1416,19 @@ impl TotpApp {
                         }
                     };
                     let frac = (rem / a.period as f32).clamp(0.0, 1.0);
+                    let pad = if self.compact { 4.0 } else { 10.0 };
+                    let av = if self.compact { 28.0 } else { 40.0 };
+                    let code_sz = if self.compact { 16.0 } else { 20.0 };
                     let mut frame = egui::Frame::group(ui.style())
-                        .inner_margin(10.0)
+                        .inner_margin(pad)
                         .corner_radius(10.0);
                     if is_sel {
-                        frame = frame.stroke(egui::Stroke::new(2.0, accent));
+                        let w = if self.high_contrast { 3.0 } else { 2.0 };
+                        frame = frame.stroke(egui::Stroke::new(w, accent));
                     }
                     let inner = frame.show(&mut *ui, |ui| {
                         ui.horizontal(|ui| {
-                            avatar(ui, a, 40.0);
+                            avatar(ui, a, av);
                             ui.add_space(4.0);
                             ui.vertical(|ui| {
                                 ui.label(egui::RichText::new(&a.name).size(15.0).strong());
@@ -1021,22 +1437,30 @@ impl TotpApp {
                                 } else {
                                     ui.weak(&a.issuer);
                                 }
+                                if is_sel && let Some(nc) = next_code_text(a, now) {
+                                    ui.weak(self.t("main.next", &[nc.into()]));
+                                }
                             });
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     countdown_ring(ui, frac, rem as i64, accent);
                                     ui.add_space(6.0);
+                                    let glyph = if is_pin { "★" } else { "☆" };
+                                    if ui.small_button(glyph).clicked() {
+                                        toggle_pin = Some(ai);
+                                    }
+                                    ui.add_space(4.0);
                                     let code = if rem <= 5.0 {
                                         egui::RichText::new(&code_txt)
                                             .monospace()
-                                            .size(20.0)
+                                            .size(code_sz)
                                             .strong()
                                             .color(DANGER)
                                     } else {
                                         egui::RichText::new(&code_txt)
                                             .monospace()
-                                            .size(20.0)
+                                            .size(code_sz)
                                             .strong()
                                     };
                                     ui.label(code);
@@ -1064,6 +1488,19 @@ impl TotpApp {
                 } else if let Some(ai) = clicked {
                     self.touch();
                     self.selected = Some(ai);
+                    if self.copy_on_select {
+                        self.copy_code();
+                    }
+                }
+                if let Some(ai) = toggle_pin {
+                    self.touch();
+                    if let Some(a) = self.accounts.get(ai).cloned() {
+                        let k = pin_key(&a.name, &a.issuer);
+                        if !self.pinned.remove(&k) {
+                            self.pinned.insert(k);
+                        }
+                        self.reorder_visible();
+                    }
                 }
             });
         });
@@ -1128,11 +1565,21 @@ impl TotpApp {
         if paste_qr {
             self.paste_qr();
         }
+        if backup {
+            self.touch();
+            self.dialog = Dialog::Backup(backup_dest_default(&self.path));
+        }
         if settings {
             self.touch();
             self.dialog = Dialog::Settings(SettingsForm {
                 idle: self.idle_minutes.to_string(),
                 hide: self.hide_codes,
+                lock_focus: self.lock_on_focus,
+                copy_select: self.copy_on_select,
+                compact: self.compact,
+                contrast: self.high_contrast,
+                tray: self.tray_enabled,
+                font_idx: font_idx_from_scale(self.font_scale),
                 lang_idx: i18n::index_of(&self.lang),
                 theme_idx: self.theme_mode.index(),
                 ..Default::default()
@@ -1288,6 +1735,7 @@ impl TotpApp {
                 let mut open = true;
                 let mut cancelled = false;
                 let mut go = false;
+                let mut show_qr = false;
                 egui::Window::new(self.t("export.title", &[]))
                     .open(&mut open)
                     .show(&*ui, |ui| {
@@ -1296,12 +1744,22 @@ impl TotpApp {
                             if ui.button(self.t("btn.copy", &[])).clicked() {
                                 go = true;
                             }
+                            if ui.button(self.t("export.show_qr", &[])).clicked() {
+                                show_qr = true;
+                            }
                             if ui.button(self.t("btn.cancel", &[])).clicked() {
                                 cancelled = true;
                             }
                         });
                     });
-                if go {
+                if show_qr {
+                    self.touch();
+                    if self.session.is_some() {
+                        self.qr_tex = None;
+                        self.qr_tex_uri.clear();
+                        self.dialog = Dialog::ExportQr { uri };
+                    }
+                } else if go {
                     self.touch();
                     if self.session.is_some() {
                         if let Ok(mut cb) = arboard::Clipboard::new() {
@@ -1313,6 +1771,96 @@ impl TotpApp {
                     }
                 } else if open && !cancelled {
                     self.dialog = Dialog::ExportConfirm { uri };
+                }
+            }
+            Dialog::ExportQr { uri } => {
+                let mut open = true;
+                let mut cancelled = false;
+                let mut copy = false;
+                let (tex, err) = if self.qr_tex_uri == uri
+                    && let Some(h) = self.qr_tex.clone()
+                {
+                    (Some(h), None)
+                } else {
+                    match qr_color_image(&uri) {
+                        Ok(img) => {
+                            let h = ui.ctx().load_texture(
+                                "export-qr",
+                                img,
+                                egui::TextureOptions::NEAREST,
+                            );
+                            self.qr_tex = Some(h.clone());
+                            self.qr_tex_uri = uri.clone();
+                            (Some(h), None)
+                        }
+                        Err(e) => (None, Some(e)),
+                    }
+                };
+                if let Some(e) = err {
+                    self.show_err(e);
+                } else {
+                    egui::Window::new(self.t("export.qr_title", &[]))
+                        .open(&mut open)
+                        .show(&*ui, |ui| {
+                            if let Some(h) = &tex {
+                                ui.image(h);
+                            }
+                            ui.label(self.t("export.qr_hint", &[]));
+                            ui.horizontal(|ui| {
+                                if ui.button(self.t("btn.copy", &[])).clicked() {
+                                    copy = true;
+                                }
+                                if ui.button(self.t("btn.close", &[])).clicked() {
+                                    cancelled = true;
+                                }
+                            });
+                        });
+                    if copy {
+                        self.touch();
+                        if self.session.is_some() {
+                            if let Ok(mut cb) = arboard::Clipboard::new() {
+                                let _ = cb.set_text(uri.clone());
+                            }
+                            self.clipboard = uri;
+                            self.clipboard_until = Some(Instant::now() + Duration::from_secs(15));
+                            self.status = self.t("status.uri_copied", &[]);
+                        }
+                    } else if open && !cancelled {
+                        self.dialog = Dialog::ExportQr { uri };
+                    }
+                }
+            }
+            Dialog::Backup(mut dest) => {
+                let mut open = true;
+                let mut cancelled = false;
+                let mut go = false;
+                egui::Window::new(self.t("backup.title", &[]))
+                    .open(&mut open)
+                    .show(&*ui, |ui| {
+                        ui.label(self.t("backup.msg", &[]));
+                        ui.horizontal(|ui| {
+                            ui.label(self.t("backup.dest", &[]));
+                            ui.text_edit_singleline(&mut dest);
+                        });
+                        ui.horizontal(|ui| {
+                            if ui.button(self.t("btn.backup", &[])).clicked() {
+                                go = true;
+                            }
+                            if ui.button(self.t("btn.cancel", &[])).clicked() {
+                                cancelled = true;
+                            }
+                        });
+                    });
+                if go {
+                    self.touch();
+                    match backup_vault_file(&self.path, &dest) {
+                        Ok(_) => {
+                            self.status = self.t("status.backup_ok", &[dest.clone().into()]);
+                        }
+                        Err(e) => self.show_err(e.to_string()),
+                    }
+                } else if open && !cancelled {
+                    self.dialog = Dialog::Backup(dest);
                 }
             }
             Dialog::DeleteConfirm { index, label } => {
@@ -1373,6 +1921,27 @@ impl TotpApp {
                                 });
                         });
                         ui.checkbox(&mut f.hide, self.t("settings.hide", &[]));
+                        ui.checkbox(&mut f.lock_focus, self.t("settings.lock_focus", &[]));
+                        ui.checkbox(&mut f.copy_select, self.t("settings.copy_select", &[]));
+                        ui.checkbox(&mut f.compact, self.t("settings.compact", &[]));
+                        ui.checkbox(&mut f.contrast, self.t("settings.contrast", &[]));
+                        ui.checkbox(&mut f.tray, self.t("settings.tray", &[]));
+                        let font_labels = ["90%", "100%", "115%", "130%"];
+                        let font_cur = font_labels
+                            .get(f.font_idx)
+                            .cloned()
+                            .unwrap_or("100%")
+                            .to_string();
+                        ui.horizontal(|ui| {
+                            ui.label(self.t("settings.font", &[]));
+                            egui::ComboBox::from_id_salt("font")
+                                .selected_text(font_cur)
+                                .show_ui(ui, |ui| {
+                                    for (i, nm) in font_labels.iter().enumerate() {
+                                        ui.selectable_value(&mut f.font_idx, i, nm.to_string());
+                                    }
+                                });
+                        });
                         let tags = i18n::supported();
                         let names: Vec<String> = tags
                             .iter()
@@ -1413,6 +1982,10 @@ impl TotpApp {
                             ui.label(self.t("settings.repeat_pw", &[]));
                             ui.add(egui::TextEdit::singleline(&mut f.repeat_pw).password(true));
                         });
+                        if !f.new_pw.is_empty() {
+                            let s = password_strength(&f.new_pw);
+                            ui.label(self.t("pw.strength", &[i64::from(s).into()]));
+                        }
                         ui.horizontal(|ui| {
                             if ui.button(self.t("btn.save", &[])).clicked() {
                                 go = true;
@@ -1451,6 +2024,10 @@ impl TotpApp {
                             }
                         }
                         self.hide_codes = f.hide;
+                        self.lock_on_focus = f.lock_focus;
+                        self.copy_on_select = f.copy_select;
+                        self.compact = f.compact;
+                        self.font_scale = font_scale_from_idx(f.font_idx);
                         let tags = i18n::supported();
                         if let Some(tag) = tags.get(f.lang_idx)
                             && *tag != self.lang
@@ -1467,8 +2044,19 @@ impl TotpApp {
                             self.theme_mode = new_theme;
                             crate::prefs::save_theme(new_theme.as_str());
                             self.dark = new_theme.resolve();
-                            apply_theme(ui.ctx(), self.dark);
+                            apply_theme(ui.ctx(), self.dark, self.high_contrast);
                         }
+                        if self.high_contrast != f.contrast {
+                            self.high_contrast = f.contrast;
+                            apply_theme(ui.ctx(), self.dark, self.high_contrast);
+                        }
+                        if f.tray != self.tray_enabled {
+                            self.tray_enabled = f.tray;
+                            if !f.tray {
+                                self.tray = None; // icon removed
+                            }
+                        }
+                        self.refresh_tray_texts();
                         self.apply_filter();
                     }
                 } else if open && !cancelled {
@@ -1481,6 +2069,8 @@ impl TotpApp {
                     .open(&mut open)
                     .show(&*ui, |ui| {
                         ui.label(self.t("about.body", &[self.path.clone().into()]));
+                        ui.add_space(8.0);
+                        ui.label(self.t("about.keys", &[]));
                     });
                 if open {
                     self.dialog = Dialog::About;
@@ -1541,5 +2131,164 @@ mod tests {
         let mut diff = vec![acc("a", "I"), acc("b", "J")];
         diff[1].digits = 8;
         assert!(duplicate_error(lang, &diff).is_none());
+    }
+
+    #[test]
+    fn export_qr_renders_offline() {
+        let a = acc("alice", "Example");
+        let uri = totp::provisioning_uri(&a).unwrap();
+        let img = qr_color_image(&uri).unwrap();
+        assert!(!img.pixels.is_empty());
+        assert!(img.width() >= 100 && img.height() >= 100);
+        // Fail closed on payloads that exceed QR capacity.
+        assert!(qr_color_image(&"x".repeat(8000)).is_err());
+    }
+
+    #[test]
+    fn password_strength_scores_classes() {
+        assert_eq!(password_strength(""), 0);
+        assert_eq!(password_strength("short"), 0);
+        assert_eq!(password_strength("abcdefghijkl"), 1);
+        assert_eq!(password_strength("Abcdefghijkl"), 2);
+        assert_eq!(password_strength("Abcdefghijk1"), 3);
+        assert_eq!(password_strength("Abcdefghijk1!"), 4);
+        // Long but single-class stays weak.
+        assert_eq!(password_strength("aaaaaaaaaaaaaaaa"), 1);
+    }
+
+    #[test]
+    fn pin_key_normalizes() {
+        assert_eq!(pin_key(" Alice ", "Example"), pin_key("alice", "example"));
+        assert_ne!(pin_key("a", "x"), pin_key("a", "y"));
+    }
+
+    #[test]
+    fn pinned_sort_first() {
+        let all = vec![acc("bob", "B"), acc("Alice", ""), acc("alice", "A")];
+        let vis = filter(&all, "");
+        assert_eq!(vis, vec![1, 2, 0]);
+        let mut pinned = HashSet::new();
+        pinned.insert(pin_key("bob", "B"));
+        let ordered = order_pinned(&all, &vis, &pinned);
+        assert_eq!(ordered, vec![0, 1, 2]);
+        assert!(order_pinned(&all, &[], &pinned).is_empty());
+    }
+
+    #[test]
+    fn backup_dest_appends_bak() {
+        assert_eq!(backup_dest_default("vault.dat"), "vault.dat.bak");
+        assert_eq!(backup_dest_default("a/b/v.dat"), "a/b/v.dat.bak");
+    }
+
+    #[test]
+    fn clock_backwards_detected() {
+        assert!(clock_went_backwards(1000, 900));
+        assert!(!clock_went_backwards(1000, 1000));
+        assert!(!clock_went_backwards(1000, 1059));
+        assert!(!clock_went_backwards(1000, 5000));
+        assert!(!clock_went_backwards(0, 900));
+    }
+
+    #[test]
+    fn font_scale_round_trips() {
+        assert!((font_scale_from_idx(0) - 0.9).abs() < 1e-6);
+        assert!((font_scale_from_idx(1) - 1.0).abs() < 1e-6);
+        assert!((font_scale_from_idx(2) - 1.15).abs() < 1e-6);
+        assert!((font_scale_from_idx(3) - 1.3).abs() < 1e-6);
+        assert!((font_scale_from_idx(99) - 1.0).abs() < 1e-6);
+        assert_eq!(font_idx_from_scale(0.9), 0);
+        assert_eq!(font_idx_from_scale(1.0), 1);
+        assert_eq!(font_idx_from_scale(1.15), 2);
+        assert_eq!(font_idx_from_scale(1.3), 3);
+    }
+
+    #[test]
+    fn next_code_matches_period_boundary() {
+        let a = acc("alice", "Example");
+        assert_eq!(a.period, 30);
+        let (c30, _) = totp::code(&a, 30).unwrap();
+        assert_eq!(next_code_text(&a, 0).unwrap(), spaced(&c30));
+        // Same following period anywhere inside the first window.
+        assert_eq!(next_code_text(&a, 29).unwrap(), spaced(&c30));
+        let (c60, _) = totp::code(&a, 60).unwrap();
+        assert_eq!(next_code_text(&a, 30).unwrap(), spaced(&c60));
+        assert!(next_code_text(&a, -1).is_none());
+        let mut bad = acc("b", "B");
+        bad.period = 0;
+        assert!(next_code_text(&bad, 100).is_none());
+    }
+
+    #[test]
+    fn backup_file_round_trip() {
+        let dir = std::env::temp_dir();
+        let tag = format!(
+            "totpvault-baktest-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let src = dir.join(format!("{tag}.dat"));
+        let dest = dir.join(format!("{tag}.dat.bak"));
+        std::fs::write(&src, b"ciphertext-bytes").unwrap();
+        let n = backup_vault_file(src.to_str().unwrap(), dest.to_str().unwrap()).unwrap();
+        assert_eq!(n, 16);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"ciphertext-bytes");
+        std::fs::remove_file(&src).ok();
+        std::fs::remove_file(&dest).ok();
+        assert!(backup_vault_file("/no/such/dir/v.dat", "/no/such/dir/v.dat.bak").is_err());
+    }
+
+    #[test]
+    fn tray_icon_pixels_sane() {
+        let (px, w, h) = tray_icon_rgba();
+        assert_eq!((w, h), (32, 32));
+        assert_eq!(px.len(), 32 * 32 * 4);
+        let at = |x: u32, y: u32| -> [u8; 4] {
+            let i = ((y * w + x) * 4) as usize;
+            [px[i], px[i + 1], px[i + 2], px[i + 3]]
+        };
+        assert_eq!(at(0, 0)[3], 0); // transparent corner
+        assert_eq!(at(31, 31)[3], 0);
+        assert_eq!(at(14, 22), [255, 255, 255, 255]); // body
+        assert_eq!(at(16, 22), [10, 110, 100, 255]); // keyhole slot
+        assert_eq!(at(16, 7), [255, 255, 255, 255]); // shackle top
+        assert_eq!(at(16, 30), [13, 148, 136, 255]); // teal base
+    }
+
+    #[test]
+    fn close_hides_only_with_tray() {
+        assert!(should_hide_on_close(true, true, false));
+        assert!(!should_hide_on_close(true, true, true));
+        assert!(!should_hide_on_close(false, true, false));
+        assert!(!should_hide_on_close(true, false, false));
+    }
+
+    #[test]
+    fn new_ui_keys_translated_everywhere() {
+        for lang in i18n::supported() {
+            for key in [
+                "login.caps",
+                "main.next",
+                "settings.compact",
+                "settings.contrast",
+                "settings.tray",
+                "tray.show",
+                "tray.unavailable",
+                "btn.backup",
+                "backup.title",
+                "status.backup_ok",
+            ] {
+                let s = i18n::get(lang, key, &[0.into(), "x".into()]);
+                assert!(!s.is_empty() && s != key, "{key} missing in {lang}");
+            }
+        }
+    }
+
+    #[test]
+    fn new_settings_default_off() {
+        let f = SettingsForm::default();
+        assert!(!f.compact && !f.contrast && !f.lock_focus && !f.copy_select && !f.tray);
     }
 }

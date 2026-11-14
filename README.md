@@ -14,13 +14,20 @@ A small offline authenticator for Windows, Linux and macOS, written in Rust with
 - Duplicate protection: same name+issuer or same secret with identical settings is rejected.
 - Import `otpauth://totp/...` provisioning URIs.
 - Export a selected account as a provisioning URI for import in another app.
+- Show the provisioning URI as an offline QR code for phone scanning (Export → Show QR).
+- Back up the encrypted vault file (`⋯` → Backup vault); the backup needs the same master password.
+- Every save keeps a best-effort `<vault>.bak` of the previous ciphertext.
+- Optional system-tray icon (Settings): left-click shows/hides the window, menu for Show/Lock/Quit; closing the window hides to tray instead of quitting (Linux needs a StatusNotifier tray — on GNOME install the AppIndicator extension).
 - Paste a QR screenshot from the clipboard (`Paste QR`): the image is decoded
   offline and the enclosed provisioning URI is imported (PNG/JPEG, ≤5 MiB).
 - SHA-1, SHA-256 and SHA-512; 6 or 8 digits; configurable period (default 30 seconds).
 - Live codes and countdown rings (red under 6 seconds); copy with the button, double-click or Enter.
+- Pin accounts on top (★), optional copy-on-select, per-session font size, compact rows and high contrast (Settings).
+- Selected account also previews its next-period code.
 - Optional privacy: hide codes until selected (Settings).
 - Clear copied codes and exported URIs after 15 seconds, if the clipboard still contains them.
 - Manual lock and auto-lock after 5 minutes of inactivity (1–15 minutes per session, wall-clock backstop for sleep).
+- Optional lock on window focus loss; password-strength meter on create/change; Caps Lock warning; backwards system-clock warning.
 - Change the master password from Settings. About dialog shows the vault path and backup reminder.
 - Interface in English, French, German, Italian, Spanish, Chinese (Simplified) and Greek (auto-detected, switchable in Settings).
 - No server, account registration, telemetry or network requests.
