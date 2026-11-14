@@ -1048,6 +1048,40 @@ fn avatar_color(key: &str) -> egui::Color32 {
     AVATAR_COLORS[(h % AVATAR_COLORS.len() as u64) as usize]
 }
 
+/// Pushpin toggle, vector-drawn: ★/☆ are tofu in Segoe UI/Consolas, so the
+/// pin is painted (filled = pinned, outline = free) instead of relying on a
+/// font glyph. Pure paint, no I/O.
+fn pin_button(ui: &mut egui::Ui, pinned: bool, accent: egui::Color32, tip: &str) -> egui::Response {
+    let size = egui::vec2(26.0, 26.0);
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    let p = ui.painter_at(rect);
+    let c = rect.center();
+    if ui.rect_contains_pointer(rect) {
+        p.circle_filled(
+            c,
+            12.0,
+            egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 32),
+        );
+    }
+    let head = c + egui::vec2(0.0, -5.0);
+    if pinned {
+        p.circle_filled(head, 5.5, accent);
+        p.line_segment(
+            [head + egui::vec2(0.0, 5.5), head + egui::vec2(0.0, 11.5)],
+            egui::Stroke::new(2.5, accent),
+        );
+    } else {
+        let weak = ui.visuals().weak_text_color();
+        p.circle_stroke(head, 5.5, egui::Stroke::new(2.0, weak));
+        p.line_segment(
+            [head + egui::vec2(0.0, 5.5), head + egui::vec2(0.0, 11.5)],
+            egui::Stroke::new(2.0, weak),
+        );
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(tip)
+}
+
 /// Colored disc with the account's initial (issuer, else name).
 fn avatar(ui: &mut egui::Ui, account: &totp::Account, diameter: f32) {
     let key = if account.issuer.is_empty() {
@@ -1400,6 +1434,7 @@ impl TotpApp {
             egui::ScrollArea::vertical().show(&mut *ui, |ui| {
                 let now = now_unix();
                 let accent = if self.dark { ACCENT_DARK } else { ACCENT_LIGHT };
+                let pin_tip = self.t("pin.tip", &[]);
                 let mut clicked: Option<usize> = None;
                 let mut double_clicked: Option<usize> = None;
                 let mut toggle_pin: Option<usize> = None;
@@ -1446,8 +1481,7 @@ impl TotpApp {
                                 |ui| {
                                     countdown_ring(ui, frac, rem as i64, accent);
                                     ui.add_space(6.0);
-                                    let glyph = if is_pin { "★" } else { "☆" };
-                                    if ui.small_button(glyph).clicked() {
+                                    if pin_button(ui, is_pin, accent, &pin_tip).clicked() {
                                         toggle_pin = Some(ai);
                                     }
                                     ui.add_space(4.0);
@@ -2079,7 +2113,7 @@ impl TotpApp {
             Dialog::Error(msg) => {
                 let mut open = true;
                 let mut cancelled = false;
-                egui::Window::new("⚠")
+                egui::Window::new("!")
                     .open(&mut open)
                     .collapsible(false)
                     .show(&*ui, |ui| {
@@ -2276,6 +2310,7 @@ mod tests {
                 "settings.tray",
                 "tray.show",
                 "tray.unavailable",
+                "pin.tip",
                 "btn.backup",
                 "backup.title",
                 "status.backup_ok",

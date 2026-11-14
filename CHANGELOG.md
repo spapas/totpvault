@@ -5,6 +5,11 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+### Fixed
+
+- Pin toggle is now a vector-drawn icon (the ★/☆ glyphs rendered as tofu in
+  Segoe UI/Consolas); error dialog title no longer uses ⚠.
+
 ## [3.0.0] - 2026-11-15
 
 ### Added
