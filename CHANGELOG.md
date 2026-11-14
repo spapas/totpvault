@@ -5,10 +5,16 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-11-15
+
 ### Fixed
 
-- Pin toggle is now a vector-drawn icon (the ★/☆ glyphs rendered as tofu in
-  Segoe UI/Consolas); error dialog title no longer uses ⚠.
+- Pin is now a vector-drawn 5-pointed star (the ★/☆ glyphs rendered as tofu
+  in Segoe UI/Consolas); error dialog title no longer uses ⚠.
+- Pin toggle actually works: the star is painted and sensed on top of the
+  card interact (egui delivers a click only to the topmost widget, so the
+  card used to swallow it). Toggling also selects the card and reports
+  pin/unpin in the status bar.
 
 ## [3.0.0] - 2026-11-15
 

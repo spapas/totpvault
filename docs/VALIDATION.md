@@ -87,3 +87,18 @@ Rust 1.99.1 windows/x86_64-msvc, after the `3.0.0` bump (vault format v1 unchang
   by unit tests for the pure helpers; manual desktop walkthrough (tray
   show/hide/quit on Windows/Linux/macOS, QR scan, backup restore) is pending
   and should be done against the release binaries.
+
+## 3.1.0 — 15 November 2026 (Europe/Athens)
+
+Patch release on vault format v1 (unchanged): vector-drawn star pin
+(instead of tofu-prone ★/☆) and a real toggle fix — the card-level
+interact used to swallow the pin clicks, now covered by a headless
+click-regression test.
+
+- `cargo test --locked`: passed (18 app tests incl. star geometry +
+  click-delivery regression; 6 i18n; totp/vault/qrimg incl. Go interop).
+- `cargo fmt --check` / `cargo clippy --all-targets --locked -- -D warnings`:
+  passed locally on Windows; repeated by CI on all three platforms.
+- `cargo audit`: no new advisories.
+- Pin toggle manually verified on Windows (star fills, card jumps on top,
+  status confirms pin/unpin).

@@ -3483,7 +3483,7 @@ dependencies = [
 
 [[package]]
 name = "totpvault"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "arboard",
  "dirs",
@@ -3501,14 +3501,14 @@ dependencies = [
 
 [[package]]
 name = "totpvault-i18n"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "sys-locale",
 ]
 
 [[package]]
 name = "totpvault-qrimg"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "image",
  "qrcode",
@@ -3519,7 +3519,7 @@ dependencies = [
 
 [[package]]
 name = "totpvault-totp"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "data-encoding",
  "hmac",
@@ -3533,7 +3533,7 @@ dependencies = [
 
 [[package]]
 name = "totpvault-vault"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "aead",
  "argon2",
