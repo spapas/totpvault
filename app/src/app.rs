@@ -1048,35 +1048,63 @@ fn avatar_color(key: &str) -> egui::Color32 {
     AVATAR_COLORS[(h % AVATAR_COLORS.len() as u64) as usize]
 }
 
-/// Pushpin toggle, vector-drawn: ★/☆ are tofu in Segoe UI/Consolas, so the
-/// pin is painted (filled = pinned, outline = free) instead of relying on a
-/// font glyph. Pure paint, no I/O.
-fn pin_button(ui: &mut egui::Ui, pinned: bool, accent: egui::Color32, tip: &str) -> egui::Response {
-    let size = egui::vec2(26.0, 26.0);
-    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+/// Vertices of a 5-pointed star (even indices = outer radius, starting at
+/// the top). Pure geometry, no paint — unit-tested below.
+pub fn star_points(center: [f32; 2], r_outer: f32, r_inner: f32) -> Vec<[f32; 2]> {
+    (0..10)
+        .map(|i| {
+            let r = if i % 2 == 0 { r_outer } else { r_inner };
+            let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::TAU / 10.0;
+            [center[0] + a.cos() * r, center[1] + a.sin() * r]
+        })
+        .collect()
+}
+
+/// Star toggle button, vector-drawn (★/☆ are tofu in Segoe UI/Consolas).
+/// Filled teal = pinned on top, gray outline = free. Pure paint, no I/O.
+///
+/// Must be painted AFTER (on top of) the card `interact`, because egui
+/// delivers a click only to the topmost widget: a card-level interact
+/// registered later covers an inner button and the button would never fire.
+/// Callers reserve the slot with a hover-only allocation inside the row and
+/// paint here afterwards.
+fn star_button_at(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    rect: egui::Rect,
+    pinned: bool,
+    accent: egui::Color32,
+    tip: &str,
+) -> egui::Response {
+    let resp = ui.interact(rect, id, egui::Sense::click());
     let p = ui.painter_at(rect);
     let c = rect.center();
     if ui.rect_contains_pointer(rect) {
         p.circle_filled(
             c,
-            12.0,
+            13.0,
             egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 32),
         );
     }
-    let head = c + egui::vec2(0.0, -5.0);
+    // Concave star: fan of 10 center triangles (convex_polygon assumes
+    // convexity, so one call for the whole star would render wrong).
+    let pts: Vec<egui::Pos2> = star_points([c.x, c.y], 9.5, 4.0)
+        .into_iter()
+        .map(|[x, y]| egui::pos2(x, y))
+        .collect();
     if pinned {
-        p.circle_filled(head, 5.5, accent);
-        p.line_segment(
-            [head + egui::vec2(0.0, 5.5), head + egui::vec2(0.0, 11.5)],
-            egui::Stroke::new(2.5, accent),
-        );
+        for i in 0..10 {
+            p.add(egui::Shape::convex_polygon(
+                vec![c, pts[i], pts[(i + 1) % 10]],
+                accent,
+                egui::Stroke::NONE,
+            ));
+        }
     } else {
-        let weak = ui.visuals().weak_text_color();
-        p.circle_stroke(head, 5.5, egui::Stroke::new(2.0, weak));
-        p.line_segment(
-            [head + egui::vec2(0.0, 5.5), head + egui::vec2(0.0, 11.5)],
-            egui::Stroke::new(2.0, weak),
-        );
+        p.add(egui::Shape::closed_line(
+            pts,
+            egui::Stroke::new(2.0, ui.visuals().weak_text_color()),
+        ));
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(tip)
@@ -1461,6 +1489,7 @@ impl TotpApp {
                         let w = if self.high_contrast { 3.0 } else { 2.0 };
                         frame = frame.stroke(egui::Stroke::new(w, accent));
                     }
+                    let mut pin_slot = None;
                     let inner = frame.show(&mut *ui, |ui| {
                         ui.horizontal(|ui| {
                             avatar(ui, a, av);
@@ -1481,9 +1510,13 @@ impl TotpApp {
                                 |ui| {
                                     countdown_ring(ui, frac, rem as i64, accent);
                                     ui.add_space(6.0);
-                                    if pin_button(ui, is_pin, accent, &pin_tip).clicked() {
-                                        toggle_pin = Some(ai);
-                                    }
+                                    // Slot only: the clickable star is painted
+                                    // after the card interact below, on top.
+                                    let (slot, _) = ui.allocate_exact_size(
+                                        egui::vec2(28.0, 28.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    pin_slot = Some(slot);
                                     ui.add_space(4.0);
                                     let code = if rem <= 5.0 {
                                         egui::RichText::new(&code_txt)
@@ -1513,6 +1546,14 @@ impl TotpApp {
                     } else if resp.clicked() {
                         clicked = Some(ai);
                     }
+                    // Painted last = on top: the star (and only the star)
+                    // receives clicks on its rect; the card keeps the rest.
+                    let pin_id = ui.make_persistent_id(("account-pin", ai));
+                    if let Some(slot) = pin_slot
+                        && star_button_at(ui, pin_id, slot, is_pin, accent, &pin_tip).clicked()
+                    {
+                        toggle_pin = Some(ai);
+                    }
                     ui.add_space(4.0);
                 }
                 if let Some(ai) = double_clicked {
@@ -1528,11 +1569,25 @@ impl TotpApp {
                 }
                 if let Some(ai) = toggle_pin {
                     self.touch();
+                    self.selected = Some(ai);
                     if let Some(a) = self.accounts.get(ai).cloned() {
                         let k = pin_key(&a.name, &a.issuer);
-                        if !self.pinned.remove(&k) {
+                        let now_pinned = if self.pinned.remove(&k) {
+                            false
+                        } else {
                             self.pinned.insert(k);
-                        }
+                            true
+                        };
+                        // Loud feedback: the status bar confirms the toggle,
+                        // so a missed click is distinguishable from a no-op.
+                        self.status = self.t(
+                            if now_pinned {
+                                "pin.pinned"
+                            } else {
+                                "pin.unpinned"
+                            },
+                            &[a.name.clone().into()],
+                        );
                         self.reorder_visible();
                     }
                 }
@@ -2292,6 +2347,122 @@ mod tests {
     }
 
     #[test]
+    fn star_points_alternate_radii_top_first() {
+        let pts = star_points([0.0, 0.0], 10.0, 4.0);
+        assert_eq!(pts.len(), 10);
+        for (i, p) in pts.iter().enumerate() {
+            let d = (p[0] * p[0] + p[1] * p[1]).sqrt();
+            let want = if i % 2 == 0 { 10.0 } else { 4.0 };
+            assert!((d - want).abs() < 1e-4, "{i}: {d}");
+        }
+        // First vertex is the top point.
+        assert!(pts[0][0].abs() < 1e-4);
+        assert!((pts[0][1] + 10.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn star_button_registers_click_inside_card() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        // Faithful miniature of the card: a hover-only slot inside the frame,
+        // the card interact over the whole card, and the clickable star
+        // painted last (on top) — exactly like show_main. egui delivers a
+        // click only to the topmost widget, so painting order is load-bearing.
+        fn show_card(
+            ui: &mut egui::Ui,
+            star_rect: &Rc<Cell<Option<egui::Rect>>>,
+            star_clicked: &Rc<Cell<bool>>,
+            star_hovered: &Rc<Cell<bool>>,
+            card_clicked: &Rc<Cell<bool>>,
+        ) {
+            let frame = egui::Frame::group(ui.style());
+            let mut slot = None;
+            let inner = frame.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let (s, _) =
+                        ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
+                    slot = Some(s);
+                });
+            });
+            let card = ui.interact(
+                inner.response.rect,
+                ui.make_persistent_id("card"),
+                egui::Sense::click(),
+            );
+            if card.clicked() {
+                card_clicked.set(true);
+            }
+            if let Some(r) = slot {
+                let resp = star_button_at(
+                    ui,
+                    ui.make_persistent_id("pin"),
+                    r,
+                    false,
+                    ACCENT_LIGHT,
+                    "tip",
+                );
+                star_rect.set(Some(resp.rect));
+                star_hovered.set(resp.hovered());
+                if resp.clicked() {
+                    star_clicked.set(true);
+                }
+            }
+        }
+        let ctx = egui::Context::default();
+        // No fonts in headless passes (vector-only paint, like __run_test_ui).
+        ctx.set_fonts(egui::FontDefinitions::empty());
+        let star_rect = Rc::new(Cell::new(None));
+        let star_clicked = Rc::new(Cell::new(false));
+        let star_hovered = Rc::new(Cell::new(false));
+        let card_clicked = Rc::new(Cell::new(false));
+        // run_ui returns texture deltas nobody applies headless: drop them
+        // explicitly, like __run_test_ui does.
+        let screen = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(800.0, 600.0),
+        ));
+        let run_card = |mut raw: egui::RawInput| {
+            raw.screen_rect = screen;
+            raw.focused = true;
+            // 0.37 routes sizing/hit-testing through the viewport map; the
+            // legacy top-level screen_rect alone is not enough headless.
+            let vp_id = raw.viewport_id;
+            if let Some(vp) = raw.viewports.get_mut(&vp_id) {
+                vp.inner_rect = screen;
+                vp.focused = Some(true);
+            }
+            ctx.run_ui(raw, |ui| {
+                show_card(ui, &star_rect, &star_clicked, &star_hovered, &card_clicked);
+            })
+            .drop_without_applying_deltas();
+        };
+        run_card(egui::RawInput::default());
+        let rect = star_rect.get().expect("star laid out");
+        assert!(rect.width() > 20.0 && rect.height() > 20.0);
+        // Move-only pass: pointer tracking must see the star as hovered.
+        let mut raw = egui::RawInput::default();
+        raw.events.push(egui::Event::PointerMoved(rect.center()));
+        run_card(raw);
+        assert!(star_hovered.get(), "star must be hovered");
+        for pressed in [true, false] {
+            let mut raw = egui::RawInput::default();
+            raw.events.push(egui::Event::PointerMoved(rect.center()));
+            raw.events.push(egui::Event::PointerButton {
+                pos: rect.center(),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            });
+            run_card(raw);
+        }
+        assert!(star_clicked.get(), "star button must report clicked");
+        assert!(
+            !card_clicked.get(),
+            "card under the star must not steal the click"
+        );
+    }
+
+    #[test]
     fn close_hides_only_with_tray() {
         assert!(should_hide_on_close(true, true, false));
         assert!(!should_hide_on_close(true, true, true));
@@ -2311,6 +2482,8 @@ mod tests {
                 "tray.show",
                 "tray.unavailable",
                 "pin.tip",
+                "pin.pinned",
+                "pin.unpinned",
                 "btn.backup",
                 "backup.title",
                 "status.backup_ok",
