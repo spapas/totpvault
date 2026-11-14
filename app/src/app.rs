@@ -183,8 +183,18 @@ pub fn next_code_text(account: &totp::Account, now: i64) -> Option<String> {
 
 /// Copy the encrypted vault file as-is (manual Backup dialog and the
 /// best-effort auto-`.bak` share this one path). No crypto here. Pure I/O.
+///
+/// POSIX: tightened to 0600 like the vault itself — `fs::copy` alone would
+/// leave 0644 (group/other-readable). Fails the backup if tightening fails
+/// rather than leaving a readable copy behind.
 pub fn backup_vault_file(src: &str, dest: &str) -> std::io::Result<u64> {
-    std::fs::copy(src, dest)
+    let n = std::fs::copy(src, dest)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(n)
 }
 
 /// 32x32 RGBA padlock for the tray: transparent rounded square, teal base,
@@ -2324,6 +2334,12 @@ mod tests {
         let n = backup_vault_file(src.to_str().unwrap(), dest.to_str().unwrap()).unwrap();
         assert_eq!(n, 16);
         assert_eq!(std::fs::read(&dest).unwrap(), b"ciphertext-bytes");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "backup must be owner-only");
+        }
         std::fs::remove_file(&src).ok();
         std::fs::remove_file(&dest).ok();
         assert!(backup_vault_file("/no/such/dir/v.dat", "/no/such/dir/v.dat.bak").is_err());
