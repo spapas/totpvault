@@ -5,6 +5,14 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+### Added
+
+- Deterministic hostile-input robustness tests for vault bytes, URIs and QR
+  images (fail-closed, never panic; complement to a future libFuzzer setup).
+- Supply-chain gates: `cargo-deny` policy (`deny.toml`: crates.io-only,
+  permissive licenses, no wildcards) enforced in CI, plus an informational
+  `cargo-geiger` unsafe-usage report.
+
 ## [3.1.0] - 2026-11-15
 
 ### Fixed

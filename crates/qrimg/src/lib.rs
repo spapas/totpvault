@@ -133,4 +133,62 @@ mod tests {
         // totpvault-totp (covered in totp tests). The length check in
         // decode_bytes stays as defense-in-depth.
     }
+
+    /// Deterministic xorshift64 (fixed seed): reproducible hostile inputs.
+    fn xorshift(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    /// Hostile image bytes must fail closed, never panic: this is the
+    /// untrusted-clipboard surface (malicious screenshots hit the PNG/JPEG
+    /// decoder and QR detector before any validation). Deterministic
+    /// complement to libFuzzer.
+    #[test]
+    fn hostile_images_never_panic() {
+        let corpus: Vec<Vec<u8>> = vec![
+            encode_uri(TEST_URI),
+            solid_png(64, 64),
+            vec![],
+            b"not an image".to_vec(),
+            vec![0u8; 128],
+            vec![0xffu8; 256],
+            b"\x89PNG\r\n\x1a\n".to_vec(),
+        ];
+        let mut st = 0x27d4eb2f165667c5u64;
+        for _ in 0..600 {
+            let src = &corpus[(xorshift(&mut st) as usize) % corpus.len()];
+            let mut b = src.clone();
+            let ops = 1 + (xorshift(&mut st) % 3) as usize;
+            for _ in 0..ops {
+                if b.is_empty() {
+                    b.push((xorshift(&mut st) & 0xff) as u8);
+                    continue;
+                }
+                match xorshift(&mut st) % 4 {
+                    0 => {
+                        let p = (xorshift(&mut st) as usize) % b.len();
+                        b[p] = (xorshift(&mut st) & 0xff) as u8;
+                    }
+                    1 => {
+                        let p = (xorshift(&mut st) as usize) % (b.len() + 1);
+                        b.insert(p, (xorshift(&mut st) & 0xff) as u8);
+                    }
+                    2 => {
+                        let p = (xorshift(&mut st) as usize) % b.len();
+                        b.remove(p);
+                    }
+                    _ => {
+                        let cut = (xorshift(&mut st) as usize) % (b.len() + 1);
+                        b.truncate(cut);
+                    }
+                }
+            }
+            let _ = decode_bytes(&b);
+        }
+    }
 }

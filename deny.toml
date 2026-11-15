@@ -1,0 +1,38 @@
+# cargo-deny: supply-chain policy. Checked in CI (`supply-chain` job).
+# Licenses: permissive allow-list (anything else, incl. copyleft, fails).
+# Sources: everything must come from crates.io (no git deps).
+[graph]
+
+[advisories]
+ignore = [
+    # Unmaintained zbus stack (informational RUSTSEC advisories, no known
+    # vulnerability; same posture as `cargo audit`). Revisit on upgrade.
+    { id = "RUSTSEC-2026-0370", reason = "unmaintained zvariant, no replacement yet" },
+    { id = "RUSTSEC-2026-0371", reason = "unmaintained zbus_names, no replacement yet" },
+    { id = "RUSTSEC-2026-0372", reason = "unmaintained zvariant_derive, no replacement yet" },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "BSL-1.0",
+    "Zlib",
+    "Unlicense",
+    "MPL-2.0",
+    # Embedded GUI fonts (OFL/Ubuntu-font are font-specific permissive).
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "Unicode-3.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

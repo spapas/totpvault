@@ -659,4 +659,72 @@ mod tests {
             .is_err()
         );
     }
+
+    /// Deterministic xorshift64 (fixed seed): reproducible hostile inputs,
+    /// no RNG dependency, no timing flakes.
+    fn xorshift(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    fn mutate_bytes(st: &mut u64, b: &mut Vec<u8>) {
+        if b.is_empty() {
+            b.push((xorshift(st) & 0xff) as u8);
+            return;
+        }
+        match xorshift(st) % 4 {
+            0 => {
+                let p = (xorshift(st) as usize) % b.len();
+                b[p] = (xorshift(st) & 0xff) as u8;
+            }
+            1 => {
+                let p = (xorshift(st) as usize) % (b.len() + 1);
+                b.insert(p, (xorshift(st) & 0xff) as u8);
+            }
+            2 => {
+                let p = (xorshift(st) as usize) % b.len();
+                b.remove(p);
+            }
+            _ => {
+                let cut = (xorshift(st) as usize) % (b.len() + 1);
+                b.truncate(cut);
+            }
+        }
+    }
+
+    /// Hostile URIs must fail closed, never panic: mutated/decoded garbage
+    /// through parse_uri, and any accepted account through code/URI render.
+    /// Deterministic complement to libFuzzer (fixed seed, fast).
+    #[test]
+    fn hostile_uris_never_panic() {
+        let corpus: Vec<String> = vec![
+            "otpauth://totp/GitHub:user%40example.com?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=GitHub".into(),
+            "otpauth://totp/A:b?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=A&algorithm=SHA256&digits=8&period=60".into(),
+            "otpauth://hotp/x?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&counter=1".into(),
+            String::new(),
+            "::::???###".into(),
+            "%ff%fe%00%41".into(),
+            "otpauth://totp/x?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&lock=1&image=2".into(),
+            "A".repeat(9000),
+        ];
+        let mut st = 0x123456789abcdefu64;
+        for _ in 0..800 {
+            let src = &corpus[(xorshift(&mut st) as usize) % corpus.len()];
+            let mut b = src.as_bytes().to_vec();
+            let ops = 1 + (xorshift(&mut st) % 3) as usize;
+            for _ in 0..ops {
+                mutate_bytes(&mut st, &mut b);
+            }
+            let s = String::from_utf8_lossy(&b);
+            if let Ok(a) = parse_uri(&s) {
+                let _ = code(&a, 59);
+                let _ = code(&a, 2_000_000_000);
+                let _ = provisioning_uri(&a);
+            }
+        }
+    }
 }

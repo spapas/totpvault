@@ -48,6 +48,21 @@ jobs:
             target/release/totpvault
             target/release/totpvault.exe
           if-no-files-found: error
+  supply-chain:
+    name: Supply chain (deny + geiger)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo-deny
+        run: |
+          cargo install cargo-deny --locked
+          cargo deny check
+      - name: cargo-geiger (informational)
+        run: |
+          cargo install cargo-geiger --locked
+          cargo geiger --manifest-path app/Cargo.toml --all-targets || true
   release:
     name: Publish GitHub Release
     needs: build

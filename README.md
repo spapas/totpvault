@@ -98,7 +98,7 @@ cargo test --locked
 cargo run -p totpvault
 ```
 
-GUI uses `eframe` on the `glow`/OpenGL renderer. Checks run in CI on all three platforms: `cargo fmt --check`, `cargo test --locked`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo audit`, release build.
+GUI uses `eframe` on the `glow`/OpenGL renderer. Checks run in CI on all three platforms: `cargo fmt --check`, `cargo test --locked`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo audit`, `cargo deny check`, release build (plus an informational `cargo-geiger` unsafe-usage report).
 
 ## Publishing releases
 

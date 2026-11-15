@@ -510,6 +510,66 @@ mod tests {
         assert_eq!(s.save(vec![]).unwrap_err(), Error::Locked);
     }
 
+    /// Deterministic xorshift64 (fixed seed): reproducible hostile inputs.
+    fn xorshift(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    /// Hostile vault bytes must fail closed, never panic. Mutated copies of
+    /// a real vault through unlock (KDF runs, so iterations stay small);
+    /// deterministic complement to libFuzzer.
+    #[test]
+    fn hostile_bytes_never_panic() {
+        let path = tmp();
+        {
+            let mut s = Session::create(&path, PW).unwrap();
+            s.save(vec![sample()]).unwrap();
+        }
+        let good = fs::read(&path).unwrap();
+        let mut st = 0x9e3779b97f4a7c15u64;
+        for i in 0..15 {
+            let mut b = good.clone();
+            let ops = 1 + (xorshift(&mut st) % 3) as usize;
+            for _ in 0..ops {
+                if b.is_empty() {
+                    b.push((xorshift(&mut st) & 0xff) as u8);
+                    continue;
+                }
+                match xorshift(&mut st) % 5 {
+                    0 => {
+                        let p = (xorshift(&mut st) as usize) % b.len();
+                        b[p] ^= 1 << (xorshift(&mut st) % 8);
+                    }
+                    1 => {
+                        let cut = (xorshift(&mut st) as usize) % (b.len() + 1);
+                        b.truncate(cut);
+                    }
+                    2 => {
+                        let p = (xorshift(&mut st) as usize) % (b.len() + 1);
+                        let extra = (xorshift(&mut st) % 32) as usize;
+                        for _ in 0..extra {
+                            b.insert(p, (xorshift(&mut st) & 0xff) as u8);
+                        }
+                    }
+                    3 => b.extend_from_slice(&good[..good.len().min(16)]),
+                    _ => b = vec![(xorshift(&mut st) & 0xff) as u8; 64],
+                }
+            }
+            fs::write(&path, &b).unwrap();
+            // Alternate passwords so both KDF-then-reject paths run.
+            let pw = if i % 2 == 0 { PW } else { "wrong password" };
+            let _ = Session::unlock(&path, pw);
+        }
+        // Oversize input is rejected before any KDF work.
+        fs::write(&path, vec![0u8; (8 << 20) + 1]).unwrap();
+        assert_eq!(Session::unlock(&path, PW).unwrap_err(), Error::TooBig);
+    }
+
     #[test]
     fn go_interop_fixture() {
         // Fixture written by the archived Go app (see interop/): proves the
