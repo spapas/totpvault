@@ -135,18 +135,28 @@ errors — translation never alters validation.
   optional confirm + 12-char hint on create. Submit clears entries, shows
   "Deriving encryption key…", derives Argon2id in a background thread, then
   back to the UI thread: error → message; success → main screen.
-- Main — search entry + toolbar (Add / Copy / Edit / Delete / Export + ⋯ menu
-  for Import / Paste QR / Backup / Settings / About / Lock) + scrollable account cards.
-  Cards: avatar (issuer initial), name + issuer, monospace code + countdown
-  ring (red at ≤5 s). Click selects, double-click copies. Enter / Ctrl+C
-  copies the selected code when no text field or dialog owns the keystroke.
-- Dialogs: account add/edit (validates via `normalize`; edit verifies the
-  index still holds the same account), import URI (`parse_uri`), export
-  confirm (copies URI, 15 s expiry) + offline QR display, backup (copies the
-  encrypted file as-is), delete confirm, settings (idle 1/2/5/10/15 min +
-  hide-codes + lock-on-focus + copy-on-select + compact + contrast + tray +
-  font + theme + language + optional password change), about
-  (vault path, backup reminder, clock note, shortcuts).
+- Main — full-width search (Clear button; `/` focuses, Esc clears) + toolbar
+  (Add / Copy / Edit / Delete / Export + ⋯ menu for Import / Paste QR /
+  Backup / Settings / About / Lock, horizontally scrollable) + toast line +
+  scrollable account cards. Empty vault shows Add / Import / Paste QR
+  onboarding; empty filter shows no-results + Clear.
+  Cards: avatar (issuer initial), name + issuer (+ next code when selected,
+  ✓ flash after copy), monospace code + per-card Copy button + pin star +
+  countdown ring (smaller in compact mode) + thin progress bar (red at ≤5 s).
+  Click selects, double-click copies, right-click opens Copy/Edit/Export/
+  Delete/Pin. Up/Down moves selection. Enter / Ctrl+C copies the selected
+  code when no text field or dialog owns the keystroke. Status bar appends
+  a live clipboard countdown.
+- Dialogs: account add/edit in a grid (validates via `normalize`; live code
+  preview + inline hint; show/hide secret; period presets 15/30/60 + custom;
+  edit verifies the index still holds the same account), import URI
+  (multiline + parse preview), export confirm (copies URI, 15 s expiry,
+  toast) + offline QR display, backup (copies the encrypted file as-is,
+  toast), delete confirm, settings grouped in Security / Appearance /
+  Behavior sections (idle 1/2/5/10/15 min + hide-codes + lock-on-focus +
+  copy-on-select + compact + contrast + tray + font + theme + language +
+  optional password change), about (vault path + copy-path, backup reminder,
+  clock note, shortcuts + new-keys line).
 
 ### 5.2 Invariants
 

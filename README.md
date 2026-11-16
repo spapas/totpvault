@@ -21,7 +21,10 @@ A small offline authenticator for Windows, Linux and macOS, written in Rust with
 - Paste a QR screenshot from the clipboard (`Paste QR`): the image is decoded
   offline and the enclosed provisioning URI is imported (PNG/JPEG, ≤5 MiB).
 - SHA-1, SHA-256 and SHA-512; 6 or 8 digits; configurable period (default 30 seconds).
-- Live codes and countdown rings (red under 6 seconds); copy with the button, double-click or Enter.
+- Live codes and countdown rings (red under 6 seconds); copy with the per-card button, the toolbar button, double-click or Enter.
+- Right-click any card for Copy / Edit / Export / Delete / Pin; Up/Down moves selection, `/` focuses search, Esc clears.
+- Full-width search with Clear; empty vault shows Add / Import / Paste QR onboarding, empty search shows a no-results state with Clear.
+- Thin progress bar under each card plus copy-check flash; toasts confirm Copy/Pin/Backup; status bar shows live clipboard countdown.
 - Pin accounts on top (★), optional copy-on-select, per-session font size, compact rows and high contrast (Settings).
 - Selected account also previews its next-period code.
 - Optional privacy: hide codes until selected (Settings).

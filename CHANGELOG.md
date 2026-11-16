@@ -7,6 +7,14 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ### Added
 
+- UI/UX pass: per-card Copy button + right-click menu (Copy/Edit/Export/
+  Delete/Pin), Up/Down + `/` + Esc keyboard flow, full-width search with
+  Clear, empty-vault onboarding and no-results state, thin progress bar under
+  each card, copy/pin/backup toasts, live clipboard countdown in the status
+  bar, live code preview + inline validation in Add/Edit (with show/hide
+  secret and period presets), multiline Import with parse preview, grouped
+  Settings sections, About copy-path plus new shortcut help. All strings
+  translated (EN/DE/EL/ES/FR/IT/ZH).
 - Deterministic hostile-input robustness tests for vault bytes, URIs and QR
   images (fail-closed, never panic; complement to a future libFuzzer setup).
 - Supply-chain gates: `cargo-deny` policy (`deny.toml`: crates.io-only,

@@ -152,6 +152,62 @@ pub fn font_idx_from_scale(scale: f32) -> usize {
     }
 }
 
+/// Move keyboard selection inside `visible` (which holds account indices).
+/// `delta` is +1 (Down) / -1 (Up); wraps around. Pure.
+pub fn move_selection(
+    visible: &[usize],
+    selected: Option<usize>,
+    delta: isize,
+) -> Option<usize> {
+    if visible.is_empty() {
+        return None;
+    }
+    let Some(pos) = selected.and_then(|s| visible.iter().position(|&v| v == s)) else {
+        if delta < 0 {
+            return visible.last().copied();
+        }
+        return visible.first().copied();
+    };
+    let n = visible.len() as isize;
+    let next = (pos as isize + delta).rem_euclid(n);
+    visible.get(next as usize).copied()
+}
+
+/// Seconds left on the 15 s clipboard timer, rounded up. Pure.
+pub fn clipboard_secs_left(until: Instant, now: Instant) -> u64 {
+    if now >= until {
+        0
+    } else {
+        let d = until - now;
+        d.as_secs() + u64::from(d.subsec_nanos() > 0)
+    }
+}
+
+/// Live preview for the account form: parse digits/period, normalize and
+/// render the current code. `None` = fields not yet valid. Pure.
+pub fn preview_code(
+    name: &str,
+    issuer: &str,
+    secret: &str,
+    digits_str: &str,
+    period_str: &str,
+    algorithm: &str,
+    now: i64,
+) -> Option<String> {
+    let digits: u32 = digits_str.trim().parse().ok()?;
+    let period: i64 = period_str.trim().parse().ok()?;
+    let a = totp::normalize(totp::Account {
+        name: name.to_string(),
+        issuer: issuer.to_string(),
+        secret: secret.to_string(),
+        digits,
+        period,
+        algorithm: algorithm.to_string(),
+    })
+    .ok()?;
+    totp::code(&a, now).ok().map(|(c, _)| spaced(&c))
+}
+
 /// True while Caps Lock is engaged. Windows-only via direct user32 import
 /// (no new dependency, OS API only); other platforms return false, where the
 /// login screen simply omits the warning. Pure query, no I/O.
@@ -331,6 +387,7 @@ struct LoginState {
     message: String,
     busy: bool,
     focused: bool,
+    show_pw: bool,
 }
 
 #[derive(Default)]
@@ -344,6 +401,7 @@ struct AccountForm {
     digits: String,
     period: String,
     algorithm: String,
+    show_secret: bool,
 }
 
 #[derive(Default)]
@@ -448,6 +506,8 @@ pub struct TotpApp {
     tray: Option<TrayState>,
     window_visible: bool,
     allow_close: bool,
+    toast: Option<(String, Instant)>,
+    copied_flash: Option<(usize, Instant)>,
 }
 
 impl TotpApp {
@@ -494,6 +554,8 @@ impl TotpApp {
             tray: None,
             window_visible: true,
             allow_close: false,
+            toast: None,
+            copied_flash: None,
         };
         app.refresh_login_mode();
         app
@@ -552,6 +614,8 @@ impl TotpApp {
         self.qr_reading = false;
         self.qr_tex = None;
         self.qr_tex_uri.clear();
+        self.toast = None;
+        self.copied_flash = None;
         self.clear_clipboard();
         self.screen = Screen::Login;
         self.refresh_login_mode();
@@ -628,12 +692,20 @@ impl TotpApp {
     }
 
     fn copy_code(&mut self) {
-        self.touch();
         let idx = match self.selected {
             Some(i) if self.session.is_some() => i,
             _ => return,
         };
-        if idx >= self.accounts.len() {
+        self.copy_code_at(idx);
+    }
+
+    fn toast(&mut self, msg: String) {
+        self.toast = Some((msg, Instant::now()));
+    }
+
+    fn copy_code_at(&mut self, idx: usize) {
+        self.touch();
+        if self.session.is_none() || idx >= self.accounts.len() {
             return;
         }
         match totp::code(&self.accounts[idx], now_unix()) {
@@ -644,6 +716,9 @@ impl TotpApp {
                 self.clipboard = c;
                 self.clipboard_until = Some(Instant::now() + Duration::from_secs(15));
                 self.status = self.t("status.copied", &[]);
+                self.toast(self.status.clone());
+                self.copied_flash = Some((idx, Instant::now()));
+                self.selected = Some(idx);
             }
             Err(e) => self.show_err(e.0),
         }
@@ -1146,7 +1221,17 @@ fn avatar(ui: &mut egui::Ui, account: &totp::Account, diameter: f32) {
 
 /// Countdown ring: track + remaining arc + seconds in the middle.
 fn countdown_ring(ui: &mut egui::Ui, frac: f32, seconds: i64, accent: egui::Color32) {
-    let size = 52.0;
+    countdown_ring_sized(ui, frac, seconds, accent, 52.0);
+}
+
+/// Sized variant so compact rows use a smaller ring. Pure paint.
+fn countdown_ring_sized(
+    ui: &mut egui::Ui,
+    frac: f32,
+    seconds: i64,
+    accent: egui::Color32,
+    size: f32,
+) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
     let p = ui.painter_at(rect);
     let c = rect.center();
@@ -1249,8 +1334,12 @@ impl eframe::App for TotpApp {
         }
         self.poll_tray(ui);
         // Shortcuts: Enter / Ctrl+C copy the selected code when no text field
-        // or dialog consumes the keystroke.
+        // or dialog consumes the keystroke. Up/Down moves selection, `/`
+        // focuses search, Esc clears search/selection.
         let mut want_copy = false;
+        let mut nav: Option<isize> = None;
+        let mut want_esc = false;
+        let mut want_focus_search = false;
         let wants_kb = ui.ctx().egui_wants_keyboard_input();
         let no_dialog = matches!(self.dialog, Dialog::None);
         // NOTE: egui-winit turns Ctrl+C / Ctrl+Insert into `Event::Copy`
@@ -1266,9 +1355,42 @@ impl eframe::App for TotpApp {
             if no_dialog && !wants_kb && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
                 want_copy = true;
             }
+            if no_dialog && !wants_kb {
+                if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                    nav = Some(1);
+                } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                    nav = Some(-1);
+                } else if i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+                    want_esc = true;
+                } else if i.consume_key(egui::Modifiers::NONE, egui::Key::Slash) {
+                    want_focus_search = true;
+                }
+            } else if no_dialog && wants_kb && i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+                // Esc while typing in search: clear it (selection follows).
+                want_esc = true;
+            }
         });
         if want_copy {
             self.copy_code();
+        }
+        if let Some(d) = nav {
+            self.touch();
+            self.selected = move_selection(&self.visible, self.selected, d);
+        }
+        if want_esc {
+            self.touch();
+            if !self.search.is_empty() {
+                self.search.clear();
+                self.apply_filter();
+            } else {
+                self.selected = None;
+            }
+        }
+        if want_focus_search {
+            self.touch();
+            ui.memory_mut(|m| {
+                m.request_focus(egui::Id::new("search-field"));
+            });
         }
         self.show_main(ui);
         self.show_dialog(ui);
@@ -1315,15 +1437,27 @@ impl TotpApp {
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut self.login.password)
                         .id(egui::Id::unique("login-password"))
-                        .password(true)
+                        .password(!self.login.show_pw)
                         .hint_text(ph_hint)
                         .desired_width(300.0),
                 );
+                ui.horizontal(|ui| {
+                    let eye = if self.login.show_pw {
+                        self.t("acct.hide_secret", &[])
+                    } else {
+                        self.t("acct.show_secret", &[])
+                    };
+                    if ui.small_button(eye).clicked() {
+                        self.touch();
+                        self.login.show_pw = !self.login.show_pw;
+                    }
+                    ui.weak(self.path.clone());
+                });
                 if self.login.create {
                     let rp_hint = self.t("login.ph_repeat", &[]);
                     ui.add(
                         egui::TextEdit::singleline(&mut self.login.confirm)
-                            .password(true)
+                            .password(!self.login.show_pw)
                             .hint_text(rp_hint)
                             .desired_width(300.0),
                     );
@@ -1373,236 +1507,438 @@ impl TotpApp {
         let mut settings = false;
         let mut about = false;
         let mut lock = false;
+        let mut copy_at: Option<usize> = None;
+        let mut edit_at: Option<usize> = None;
+        let mut delete_at: Option<usize> = None;
+        let mut export_at: Option<usize> = None;
+        let mut clear_search = false;
 
         egui::Panel::top("toolbar").show(&mut *ui, |ui| {
             ui.horizontal(|ui| {
                 ui.strong(self.t("main.title", &[]));
             });
-            let search_hint = self.t("main.search", &[]);
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.search)
-                    .hint_text(search_hint)
-                    .desired_width(300.0),
-            );
-            if resp.changed() {
-                self.touch();
-                self.apply_filter();
-            }
+            // Search fills the width; `/` focuses it, Esc clears it.
             ui.horizontal(|ui| {
-                let sel = self.selected.is_some();
-                let accent = if self.dark { ACCENT_DARK } else { ACCENT_LIGHT };
-                if ui
-                    .add_enabled(
-                        true,
-                        egui::Button::new(
-                            egui::RichText::new(self.t("btn.add", &[]))
-                                .strong()
-                                .color(egui::Color32::WHITE),
-                        )
-                        .fill(accent),
-                    )
-                    .clicked()
-                {
-                    add = true;
+                let search_hint = self.t("main.search", &[]);
+                let avail = ui.available_width();
+                let edit_w = if self.search.is_empty() {
+                    avail
+                } else {
+                    (avail - 70.0).max(60.0)
+                };
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.search)
+                        .id(egui::Id::new("search-field"))
+                        .hint_text(search_hint)
+                        .desired_width(edit_w),
+                );
+                if resp.changed() {
+                    self.touch();
+                    self.apply_filter();
                 }
-                if ui
-                    .add_enabled(sel, egui::Button::new(self.t("btn.copy", &[])))
-                    .clicked()
-                {
-                    copy = true;
+                if !self.search.is_empty() && ui.small_button(self.t("main.clear", &[])).clicked() {
+                    clear_search = true;
                 }
-                if ui
-                    .add_enabled(sel, egui::Button::new(self.t("btn.edit", &[])))
-                    .clicked()
-                {
-                    edit = true;
-                }
-                if ui
-                    .add_enabled(sel, egui::Button::new(self.t("btn.delete", &[])))
-                    .clicked()
-                {
-                    delete = true;
-                }
-                if ui
-                    .add_enabled(sel, egui::Button::new(self.t("btn.export", &[])))
-                    .clicked()
-                {
-                    export = true;
-                }
-                ui.menu_button("⋯", |ui| {
-                    if ui.button(self.t("btn.import_uri", &[])).clicked() {
-                        import = true;
-                        ui.close();
-                    }
-                    let qr_label = if self.qr_reading {
-                        format!("{} …", self.t("btn.paste_qr", &[]))
-                    } else {
-                        self.t("btn.paste_qr", &[])
-                    };
+            });
+            // Buttons scroll horizontally so narrow windows keep working.
+            egui::ScrollArea::horizontal().show(&mut *ui, |ui| {
+                ui.horizontal(|ui| {
+                    let sel = self.selected.is_some();
+                    let accent = if self.dark { ACCENT_DARK } else { ACCENT_LIGHT };
                     if ui
-                        .add_enabled(!self.qr_reading, egui::Button::new(qr_label))
+                        .add_enabled(
+                            true,
+                            egui::Button::new(
+                                egui::RichText::new(self.t("btn.add", &[]))
+                                    .strong()
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(accent),
+                        )
                         .clicked()
                     {
-                        paste_qr = true;
-                        ui.close();
+                        add = true;
                     }
-                    if ui.button(self.t("btn.backup", &[])).clicked() {
-                        backup = true;
-                        ui.close();
+                    if ui
+                        .add_enabled(sel, egui::Button::new(self.t("btn.copy", &[])))
+                        .clicked()
+                    {
+                        copy = true;
                     }
-                    if ui.button(self.t("btn.settings", &[])).clicked() {
-                        settings = true;
-                        ui.close();
+                    if ui
+                        .add_enabled(sel, egui::Button::new(self.t("btn.edit", &[])))
+                        .clicked()
+                    {
+                        edit = true;
                     }
-                    if ui.button(self.t("btn.about", &[])).clicked() {
-                        about = true;
-                        ui.close();
+                    if ui
+                        .add_enabled(sel, egui::Button::new(self.t("btn.delete", &[])))
+                        .clicked()
+                    {
+                        delete = true;
                     }
-                    if ui.button(self.t("btn.lock", &[])).clicked() {
-                        lock = true;
-                        ui.close();
+                    if ui
+                        .add_enabled(sel, egui::Button::new(self.t("btn.export", &[])))
+                        .clicked()
+                    {
+                        export = true;
                     }
+                    ui.menu_button("⋯", |ui| {
+                        if ui.button(self.t("btn.import_uri", &[])).clicked() {
+                            import = true;
+                            ui.close();
+                        }
+                        let qr_label = if self.qr_reading {
+                            format!("{} …", self.t("btn.paste_qr", &[]))
+                        } else {
+                            self.t("btn.paste_qr", &[])
+                        };
+                        if ui
+                            .add_enabled(!self.qr_reading, egui::Button::new(qr_label))
+                            .clicked()
+                        {
+                            paste_qr = true;
+                            ui.close();
+                        }
+                        if ui.button(self.t("btn.backup", &[])).clicked() {
+                            backup = true;
+                            ui.close();
+                        }
+                        if ui.button(self.t("btn.settings", &[])).clicked() {
+                            settings = true;
+                            ui.close();
+                        }
+                        if ui.button(self.t("btn.about", &[])).clicked() {
+                            about = true;
+                            ui.close();
+                        }
+                        if ui.button(self.t("btn.lock", &[])).clicked() {
+                            lock = true;
+                            ui.close();
+                        }
+                    });
                 });
             });
+            // Toast: transient confirmation above the list (Copy/Pin/Backup).
+            if let Some((msg, at)) = &self.toast {
+                if at.elapsed() < Duration::from_millis(2500) {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(msg).strong());
+                    });
+                }
+            }
         });
+        // Status: base text plus live clipboard countdown.
         egui::Panel::bottom("status").show(&mut *ui, |ui| {
-            ui.label(&self.status);
+            let mut text = self.status.clone();
+            if let Some(until) = self.clipboard_until {
+                let secs = clipboard_secs_left(until, Instant::now());
+                if secs > 0 {
+                    text = format!(
+                        "{text} • {}",
+                        self.t("status.clears_in", &[i64::from(secs).into()])
+                    );
+                }
+            }
+            ui.label(text);
         });
         egui::CentralPanel::default().show(&mut *ui, |ui| {
-            egui::ScrollArea::vertical().show(&mut *ui, |ui| {
-                let now = now_unix();
-                let accent = if self.dark { ACCENT_DARK } else { ACCENT_LIGHT };
-                let pin_tip = self.t("pin.tip", &[]);
-                let mut clicked: Option<usize> = None;
-                let mut double_clicked: Option<usize> = None;
-                let mut toggle_pin: Option<usize> = None;
-                for &ai in &self.visible.clone() {
-                    let a = &self.accounts[ai];
-                    let is_sel = self.selected == Some(ai);
-                    let is_pin = self.pinned.contains(&pin_key(&a.name, &a.issuer));
-                    let (code_txt, rem) = if self.hide_codes && !is_sel {
-                        ("••• •••".to_string(), (a.period - now % a.period) as f32)
-                    } else {
-                        match totp::code(a, now) {
-                            Ok((c, r)) => (spaced(&c), r as f32),
-                            Err(_) => (self.t("main.code_error", &[]), 0.0),
+            // Empty vault: onboarding instead of a blank list.
+            if self.accounts.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.heading(self.t("main.empty_title", &[]));
+                    ui.label(self.t("main.empty_hint", &[]));
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(self.t("btn.add", &[])).clicked() {
+                            add = true;
                         }
-                    };
-                    let frac = (rem / a.period as f32).clamp(0.0, 1.0);
-                    let pad = if self.compact { 4.0 } else { 10.0 };
-                    let av = if self.compact { 28.0 } else { 40.0 };
-                    let code_sz = if self.compact { 16.0 } else { 20.0 };
-                    let mut frame = egui::Frame::group(ui.style())
-                        .inner_margin(pad)
-                        .corner_radius(10.0);
-                    if is_sel {
-                        let w = if self.high_contrast { 3.0 } else { 2.0 };
-                        frame = frame.stroke(egui::Stroke::new(w, accent));
-                    }
-                    let mut pin_slot = None;
-                    let inner = frame.show(&mut *ui, |ui| {
-                        ui.horizontal(|ui| {
-                            avatar(ui, a, av);
-                            ui.add_space(4.0);
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(&a.name).size(15.0).strong());
-                                if a.issuer.is_empty() {
-                                    ui.weak("—");
-                                } else {
-                                    ui.weak(&a.issuer);
-                                }
-                                if is_sel && let Some(nc) = next_code_text(a, now) {
-                                    ui.weak(self.t("main.next", &[nc.into()]));
-                                }
-                            });
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    countdown_ring(ui, frac, rem as i64, accent);
-                                    ui.add_space(6.0);
-                                    // Slot only: the clickable star is painted
-                                    // after the card interact below, on top.
-                                    let (slot, _) = ui.allocate_exact_size(
-                                        egui::vec2(28.0, 28.0),
-                                        egui::Sense::hover(),
-                                    );
-                                    pin_slot = Some(slot);
-                                    ui.add_space(4.0);
-                                    let code = if rem <= 5.0 {
-                                        egui::RichText::new(&code_txt)
-                                            .monospace()
-                                            .size(code_sz)
-                                            .strong()
-                                            .color(DANGER)
-                                    } else {
-                                        egui::RichText::new(&code_txt)
-                                            .monospace()
-                                            .size(code_sz)
-                                            .strong()
-                                    };
-                                    ui.label(code);
-                                },
-                            );
-                        });
+                        if ui.button(self.t("btn.import_uri", &[])).clicked() {
+                            import = true;
+                        }
+                        if ui
+                            .add_enabled(!self.qr_reading, egui::Button::new(self.t("btn.paste_qr", &[])))
+                            .clicked()
+                        {
+                            paste_qr = true;
+                        }
                     });
-                    // Frames don't sense clicks on their own: make the whole
-                    // card interactive (click = select, double-click = copy).
-                    let card_id = ui.make_persistent_id(("account-card", ai));
-                    let resp = ui
-                        .interact(inner.response.rect, card_id, egui::Sense::click())
-                        .on_hover_cursor(egui::CursorIcon::PointingHand);
-                    if resp.double_clicked() {
-                        double_clicked = Some(ai);
-                    } else if resp.clicked() {
-                        clicked = Some(ai);
+                });
+            } else if self.visible.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(self.t("main.no_results", &[]));
+                    ui.add_space(8.0);
+                    if ui.button(self.t("main.clear", &[])).clicked() {
+                        clear_search = true;
                     }
-                    // Painted last = on top: the star (and only the star)
-                    // receives clicks on its rect; the card keeps the rest.
-                    let pin_id = ui.make_persistent_id(("account-pin", ai));
-                    if let Some(slot) = pin_slot
-                        && star_button_at(ui, pin_id, slot, is_pin, accent, &pin_tip).clicked()
-                    {
-                        toggle_pin = Some(ai);
-                    }
-                    ui.add_space(4.0);
-                }
-                if let Some(ai) = double_clicked {
-                    self.touch();
-                    self.selected = Some(ai);
-                    self.copy_code();
-                } else if let Some(ai) = clicked {
-                    self.touch();
-                    self.selected = Some(ai);
-                    if self.copy_on_select {
-                        self.copy_code();
-                    }
-                }
-                if let Some(ai) = toggle_pin {
-                    self.touch();
-                    self.selected = Some(ai);
-                    if let Some(a) = self.accounts.get(ai).cloned() {
-                        let k = pin_key(&a.name, &a.issuer);
-                        let now_pinned = if self.pinned.remove(&k) {
-                            false
+                });
+            } else {
+                egui::ScrollArea::vertical().show(&mut *ui, |ui| {
+                    let now = now_unix();
+                    let accent = if self.dark { ACCENT_DARK } else { ACCENT_LIGHT };
+                    let pin_tip = self.t("pin.tip", &[]);
+                    let copy_tip = self.t("card.copy_tip", &[]);
+                    let mut clicked: Option<usize> = None;
+                    let mut double_clicked: Option<usize> = None;
+                    let mut toggle_pin: Option<usize> = None;
+                    for &ai in &self.visible.clone() {
+                        let a = &self.accounts[ai];
+                        let is_sel = self.selected == Some(ai);
+                        let is_pin = self.pinned.contains(&pin_key(&a.name, &a.issuer));
+                        let (code_txt, rem) = if self.hide_codes && !is_sel {
+                            ("••• •••".to_string(), (a.period - now % a.period) as f32)
                         } else {
-                            self.pinned.insert(k);
-                            true
+                            match totp::code(a, now) {
+                                Ok((c, r)) => (spaced(&c), r as f32),
+                                Err(_) => (self.t("main.code_error", &[]), 0.0),
+                            }
                         };
-                        // Loud feedback: the status bar confirms the toggle,
-                        // so a missed click is distinguishable from a no-op.
-                        self.status = self.t(
-                            if now_pinned {
-                                "pin.pinned"
+                        let frac = (rem / a.period as f32).clamp(0.0, 1.0);
+                        let pad = if self.compact { 4.0 } else { 10.0 };
+                        let av = if self.compact { 28.0 } else { 40.0 };
+                        let code_sz = if self.compact { 16.0 } else { 20.0 };
+                        let mut frame = egui::Frame::group(ui.style())
+                            .inner_margin(pad)
+                            .corner_radius(10.0);
+                        if is_sel {
+                            let w = if self.high_contrast { 3.0 } else { 2.0 };
+                            frame = frame.stroke(egui::Stroke::new(w, accent));
+                        }
+                        let mut pin_slot = None;
+                        let mut copy_slot: Option<egui::Rect> = None;
+                        let inner = frame.show(&mut *ui, |ui| {
+                            ui.horizontal(|ui| {
+                                avatar(ui, a, av);
+                                ui.add_space(4.0);
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new(&a.name).size(15.0).strong());
+                                    if a.issuer.is_empty() {
+                                        ui.weak("—");
+                                    } else {
+                                        ui.weak(&a.issuer);
+                                    }
+                                    if is_sel && let Some(nc) = next_code_text(a, now) {
+                                        ui.weak(self.t("main.next", &[nc.into()]));
+                                    }
+                                    if let Some((fi, at)) = self.copied_flash
+                                        && fi == ai
+                                        && at.elapsed() < Duration::from_secs(2)
+                                    {
+                                        ui.strong("✓");
+                                    }
+                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let ring_sz = if self.compact { 40.0 } else { 52.0 };
+                                        if self.compact {
+                                            countdown_ring_sized(
+                                                ui,
+                                                frac,
+                                                rem as i64,
+                                                accent,
+                                                ring_sz,
+                                            );
+                                        } else {
+                                            countdown_ring(ui, frac, rem as i64, accent);
+                                        }
+                                        ui.add_space(6.0);
+                                        // Slot only: the clickable star is painted
+                                        // after the card interact below, on top.
+                                        let (slot, _) = ui.allocate_exact_size(
+                                            egui::vec2(28.0, 28.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        pin_slot = Some(slot);
+                                        ui.add_space(4.0);
+                                        // Per-card copy button: explicit target,
+                                        // no selection round-trip needed.
+                                        let (cslot, _) = ui.allocate_exact_size(
+                                            egui::vec2(52.0, 28.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        copy_slot = Some(cslot);
+                                        ui.add_space(4.0);
+                                        let code = if rem <= 5.0 {
+                                            egui::RichText::new(&code_txt)
+                                                .monospace()
+                                                .size(code_sz)
+                                                .strong()
+                                                .color(DANGER)
+                                        } else {
+                                            egui::RichText::new(&code_txt)
+                                                .monospace()
+                                                .size(code_sz)
+                                                .strong()
+                                        };
+                                        ui.label(code);
+                                    },
+                                );
+                            });
+                            // Thin progress bar under the row: at-a-glance
+                            // time left without reading the ring number.
+                            let bar_w = ui.available_width();
+                            if bar_w > 10.0 {
+                                let (rrect, _) = ui.allocate_exact_size(
+                                    egui::vec2(bar_w, 3.0),
+                                    egui::Sense::hover(),
+                                );
+                                let p = ui.painter_at(rrect);
+                                let bg = egui::Color32::from_rgba_unmultiplied(
+                                    accent.r(),
+                                    accent.g(),
+                                    accent.b(),
+                                    40,
+                                );
+                                p.rect_filled(rrect, 1.5, bg);
+                                if frac > 0.0 {
+                                    let col = if rem <= 5.0 { DANGER } else { accent };
+                                    let mut fill = rrect;
+                                    fill.max.x = fill.min.x + fill.width() * frac;
+                                    p.rect_filled(fill, 1.5, col);
+                                }
+                            }
+                        });
+                        // Frames don't sense clicks on their own: make the whole
+                        // card interactive (click = select, double-click = copy).
+                        let card_id = ui.make_persistent_id(("account-card", ai));
+                        let resp = ui
+                            .interact(inner.response.rect, card_id, egui::Sense::click())
+                            .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        resp.context_menu(|ui| {
+                            if ui.button(self.t("btn.copy", &[])).clicked() {
+                                copy_at = Some(ai);
+                                ui.close();
+                            }
+                            if ui.button(self.t("btn.edit", &[])).clicked() {
+                                edit_at = Some(ai);
+                                ui.close();
+                            }
+                            if ui.button(self.t("btn.export", &[])).clicked() {
+                                export_at = Some(ai);
+                                ui.close();
+                            }
+                            if ui.button(self.t("btn.delete", &[])).clicked() {
+                                delete_at = Some(ai);
+                                ui.close();
+                            }
+                            let pin_label = if is_pin {
+                                self.t("pin.unpinned", &[a.name.clone().into()])
                             } else {
-                                "pin.unpinned"
-                            },
-                            &[a.name.clone().into()],
-                        );
-                        self.reorder_visible();
+                                self.t("pin.pinned", &[a.name.clone().into()])
+                            };
+                            if ui.button(pin_label).clicked() {
+                                toggle_pin = Some(ai);
+                                ui.close();
+                            }
+                        });
+                        if resp.double_clicked() {
+                            double_clicked = Some(ai);
+                        } else if resp.clicked() {
+                            clicked = Some(ai);
+                        }
+                        // Per-card copy painted on top of its slot.
+                        if let Some(slot) = copy_slot {
+                            let copy_id = ui.make_persistent_id(("account-copy", ai));
+                            let cresp = ui
+                                .interact(slot, copy_id, egui::Sense::click())
+                                .on_hover_text(&copy_tip)
+                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            let p = ui.painter_at(slot);
+                            let col = if cresp.hovered() { accent } else { ui.visuals().weak_text_color() };
+                            p.rect_stroke(
+                                slot.shrink(2.0),
+                                6.0,
+                                egui::Stroke::new(1.5, col),
+                                egui::StrokeKind::Inside,
+                            );
+                            p.text(
+                                slot.center(),
+                                egui::Align2::CENTER_CENTER,
+                                self.t("btn.copy", &[]),
+                                egui::FontId::proportional(12.0),
+                                col,
+                            );
+                            if cresp.clicked() {
+                                copy_at = Some(ai);
+                            }
+                        }
+                        // Painted last = on top: the star (and only the star)
+                        // receives clicks on its rect; the card keeps the rest.
+                        let pin_id = ui.make_persistent_id(("account-pin", ai));
+                        if let Some(slot) = pin_slot
+                            && star_button_at(ui, pin_id, slot, is_pin, accent, &pin_tip).clicked()
+                        {
+                            toggle_pin = Some(ai);
+                        }
+                        ui.add_space(4.0);
                     }
-                }
-            });
+                    if let Some(ai) = double_clicked {
+                        self.touch();
+                        self.selected = Some(ai);
+                        self.copy_code();
+                    } else if let Some(ai) = clicked {
+                        self.touch();
+                        self.selected = Some(ai);
+                        if self.copy_on_select {
+                            self.copy_code();
+                        }
+                    }
+                    if let Some(ai) = toggle_pin {
+                        self.touch();
+                        self.selected = Some(ai);
+                        if let Some(a) = self.accounts.get(ai).cloned() {
+                            let k = pin_key(&a.name, &a.issuer);
+                            let now_pinned = if self.pinned.remove(&k) {
+                                false
+                            } else {
+                                self.pinned.insert(k);
+                                true
+                            };
+                            // Loud feedback: the status bar confirms the toggle,
+                            // so a missed click is distinguishable from a no-op.
+                            let msg = self.t(
+                                if now_pinned {
+                                    "pin.pinned"
+                                } else {
+                                    "pin.unpinned"
+                                },
+                                &[a.name.clone().into()],
+                            );
+                            self.status = msg.clone();
+                            self.toast(msg);
+                            self.reorder_visible();
+                        }
+                    }
+                });
+            }
         });
+
+        if clear_search {
+            self.touch();
+            self.search.clear();
+            self.apply_filter();
+        }
+        if let Some(ai) = copy_at {
+            self.copy_code_at(ai);
+        }
+        if let Some(ai) = edit_at {
+            self.touch();
+            self.selected = Some(ai);
+            edit = true;
+        }
+        if let Some(ai) = delete_at {
+            self.touch();
+            self.selected = Some(ai);
+            delete = true;
+        }
+        if let Some(ai) = export_at {
+            self.touch();
+            self.selected = Some(ai);
+            export = true;
+        }
 
         if copy {
             self.copy_code();
@@ -1703,19 +2039,29 @@ impl TotpApp {
                 egui::Window::new(self.t(if f.is_edit { "acct.edit" } else { "acct.add" }, &[]))
                     .open(&mut open)
                     .show(&*ui, |ui| {
-                        ui.horizontal(|ui| {
+                        egui::Grid::new("acct-grid").num_columns(2).spacing([8.0, 8.0]).show(ui, |ui| {
                             ui.label(self.t("acct.f_account", &[]));
                             ui.text_edit_singleline(&mut f.name);
-                        });
-                        ui.horizontal(|ui| {
+                            ui.end_row();
                             ui.label(self.t("acct.f_issuer", &[]));
                             ui.text_edit_singleline(&mut f.issuer);
-                        });
-                        ui.horizontal(|ui| {
+                            ui.end_row();
                             ui.label(self.t("acct.f_secret", &[]));
-                            ui.text_edit_singleline(&mut f.secret);
-                        });
-                        ui.horizontal(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut f.secret)
+                                        .password(!f.show_secret),
+                                );
+                                let eye = if f.show_secret {
+                                    self.t("acct.hide_secret", &[])
+                                } else {
+                                    self.t("acct.show_secret", &[])
+                                };
+                                if ui.small_button(eye).clicked() {
+                                    f.show_secret = !f.show_secret;
+                                }
+                            });
+                            ui.end_row();
                             ui.label(self.t("acct.f_digits", &[]));
                             egui::ComboBox::from_id_salt("digits")
                                 .selected_text(&f.digits)
@@ -1724,10 +2070,19 @@ impl TotpApp {
                                         ui.selectable_value(&mut f.digits, d.to_string(), d);
                                     }
                                 });
+                            ui.end_row();
                             ui.label(self.t("acct.f_period", &[]));
-                            ui.text_edit_singleline(&mut f.period);
-                        });
-                        ui.horizontal(|ui| {
+                            ui.horizontal(|ui| {
+                                egui::ComboBox::from_id_salt("period")
+                                    .selected_text(&f.period)
+                                    .show_ui(ui, |ui| {
+                                        for p in ["15", "30", "60"] {
+                                            ui.selectable_value(&mut f.period, p.to_string(), p);
+                                        }
+                                    });
+                                ui.text_edit_singleline(&mut f.period);
+                            });
+                            ui.end_row();
                             ui.label(self.t("acct.f_algo", &[]));
                             egui::ComboBox::from_id_salt("algo")
                                 .selected_text(&f.algorithm)
@@ -1736,7 +2091,23 @@ impl TotpApp {
                                         ui.selectable_value(&mut f.algorithm, al.to_string(), al);
                                     }
                                 });
+                            ui.end_row();
                         });
+                        // Live preview + inline validation before Save.
+                        let now = now_unix();
+                        if let Some(code) = preview_code(
+                            &f.name,
+                            &f.issuer,
+                            &f.secret,
+                            &f.digits,
+                            &f.period,
+                            &f.algorithm,
+                            now,
+                        ) {
+                            ui.label(format!("{}: {code}", self.t("acct.preview", &[])));
+                        } else {
+                            ui.weak(self.t("acct.live_invalid", &[]));
+                        }
                         ui.horizontal(|ui| {
                             if ui.button(self.t("btn.save", &[])).clicked() {
                                 save = true;
@@ -1800,7 +2171,26 @@ impl TotpApp {
                 egui::Window::new(self.t("import.title", &[]))
                     .open(&mut open)
                     .show(&*ui, |ui| {
-                        ui.text_edit_singleline(&mut uri);
+                        ui.label(self.t("import.f_uri", &[]));
+                        ui.add(
+                            egui::TextEdit::multiline(&mut uri)
+                                .hint_text(self.t("import.ph", &[]))
+                                .desired_rows(3)
+                                .desired_width(380.0),
+                        );
+                        // Live parse preview: name/issuer when the URI is valid.
+                        match totp::parse_uri(&uri) {
+                            Ok(a) => {
+                                let mut label = a.name.clone();
+                                if !a.issuer.is_empty() {
+                                    label = format!("{label} ({})", a.issuer);
+                                }
+                                ui.label(format!("{}: {label}", self.t("acct.preview", &[])));
+                            }
+                            Err(_) => {
+                                ui.weak(self.t("acct.live_invalid", &[]));
+                            }
+                        }
                         ui.horizontal(|ui| {
                             if ui.button(self.t("btn.import", &[])).clicked() {
                                 go = true;
@@ -1867,6 +2257,7 @@ impl TotpApp {
                         self.clipboard = uri;
                         self.clipboard_until = Some(Instant::now() + Duration::from_secs(15));
                         self.status = self.t("status.uri_copied", &[]);
+                        self.toast(self.status.clone());
                     }
                 } else if open && !cancelled {
                     self.dialog = Dialog::ExportConfirm { uri };
@@ -1923,6 +2314,7 @@ impl TotpApp {
                             self.clipboard = uri;
                             self.clipboard_until = Some(Instant::now() + Duration::from_secs(15));
                             self.status = self.t("status.uri_copied", &[]);
+                            self.toast(self.status.clone());
                         }
                     } else if open && !cancelled {
                         self.dialog = Dialog::ExportQr { uri };
@@ -1955,6 +2347,7 @@ impl TotpApp {
                     match backup_vault_file(&self.path, &dest) {
                         Ok(_) => {
                             self.status = self.t("status.backup_ok", &[dest.clone().into()]);
+                            self.toast(self.status.clone());
                         }
                         Err(e) => self.show_err(e.to_string()),
                     }
@@ -2009,89 +2402,104 @@ impl TotpApp {
                 egui::Window::new(self.t("settings.title", &[]))
                     .open(&mut open)
                     .show(&*ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(self.t("settings.idle", &[]));
-                            egui::ComboBox::from_id_salt("idle")
-                                .selected_text(&f.idle)
-                                .show_ui(ui, |ui| {
-                                    for m in ["1", "2", "5", "10", "15"] {
-                                        ui.selectable_value(&mut f.idle, m.to_string(), m);
+                        egui::ScrollArea::vertical().show(&mut *ui, |ui| {
+                            egui::CollapsingHeader::new(self.t("settings.security", &[]))
+                                .default_open(true)
+                                .show(&mut *ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(self.t("settings.idle", &[]));
+                                        egui::ComboBox::from_id_salt("idle")
+                                            .selected_text(&f.idle)
+                                            .show_ui(ui, |ui| {
+                                                for m in ["1", "2", "5", "10", "15"] {
+                                                    ui.selectable_value(&mut f.idle, m.to_string(), m);
+                                                }
+                                            });
+                                    });
+                                    ui.checkbox(&mut f.lock_focus, self.t("settings.lock_focus", &[]));
+                                    ui.horizontal(|ui| {
+                                        ui.label(self.t("settings.new_pw", &[]));
+                                        ui.add(egui::TextEdit::singleline(&mut f.new_pw).password(true));
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label(self.t("settings.repeat_pw", &[]));
+                                        ui.add(egui::TextEdit::singleline(&mut f.repeat_pw).password(true));
+                                    });
+                                    if !f.new_pw.is_empty() {
+                                        let s = password_strength(&f.new_pw);
+                                        ui.label(self.t("pw.strength", &[i64::from(s).into()]));
                                     }
                                 });
-                        });
-                        ui.checkbox(&mut f.hide, self.t("settings.hide", &[]));
-                        ui.checkbox(&mut f.lock_focus, self.t("settings.lock_focus", &[]));
-                        ui.checkbox(&mut f.copy_select, self.t("settings.copy_select", &[]));
-                        ui.checkbox(&mut f.compact, self.t("settings.compact", &[]));
-                        ui.checkbox(&mut f.contrast, self.t("settings.contrast", &[]));
-                        ui.checkbox(&mut f.tray, self.t("settings.tray", &[]));
-                        let font_labels = ["90%", "100%", "115%", "130%"];
-                        let font_cur = font_labels
-                            .get(f.font_idx)
-                            .cloned()
-                            .unwrap_or("100%")
-                            .to_string();
-                        ui.horizontal(|ui| {
-                            ui.label(self.t("settings.font", &[]));
-                            egui::ComboBox::from_id_salt("font")
-                                .selected_text(font_cur)
-                                .show_ui(ui, |ui| {
-                                    for (i, nm) in font_labels.iter().enumerate() {
-                                        ui.selectable_value(&mut f.font_idx, i, nm.to_string());
-                                    }
+                            egui::CollapsingHeader::new(self.t("settings.appearance", &[]))
+                                .default_open(true)
+                                .show(&mut *ui, |ui| {
+                                    ui.checkbox(&mut f.hide, self.t("settings.hide", &[]));
+                                    ui.checkbox(&mut f.compact, self.t("settings.compact", &[]));
+                                    ui.checkbox(&mut f.contrast, self.t("settings.contrast", &[]));
+                                    let font_labels = ["90%", "100%", "115%", "130%"];
+                                    let font_cur = font_labels
+                                        .get(f.font_idx)
+                                        .cloned()
+                                        .unwrap_or("100%")
+                                        .to_string();
+                                    ui.horizontal(|ui| {
+                                        ui.label(self.t("settings.font", &[]));
+                                        egui::ComboBox::from_id_salt("font")
+                                            .selected_text(font_cur)
+                                            .show_ui(ui, |ui| {
+                                                for (i, nm) in font_labels.iter().enumerate() {
+                                                    ui.selectable_value(&mut f.font_idx, i, nm.to_string());
+                                                }
+                                            });
+                                    });
+                                    let theme_names = [
+                                        self.t("theme.system", &[]),
+                                        self.t("theme.light", &[]),
+                                        self.t("theme.dark", &[]),
+                                    ];
+                                    let theme_cur =
+                                        theme_names.get(f.theme_idx).cloned().unwrap_or_default();
+                                    ui.horizontal(|ui| {
+                                        ui.label(self.t("settings.theme", &[]));
+                                        egui::ComboBox::from_id_salt("theme")
+                                            .selected_text(theme_cur)
+                                            .show_ui(ui, |ui| {
+                                                for (i, nm) in theme_names.iter().enumerate() {
+                                                    ui.selectable_value(&mut f.theme_idx, i, nm);
+                                                }
+                                            });
+                                    });
                                 });
-                        });
-                        let tags = i18n::supported();
-                        let names: Vec<String> = tags
-                            .iter()
-                            .map(|t| i18n::native_name(t).to_string())
-                            .collect();
-                        let cur = names.get(f.lang_idx).cloned().unwrap_or_default();
-                        ui.horizontal(|ui| {
-                            ui.label(self.t("settings.lang", &[]));
-                            egui::ComboBox::from_id_salt("lang")
-                                .selected_text(cur)
-                                .show_ui(ui, |ui| {
-                                    for (i, nm) in names.iter().enumerate() {
-                                        ui.selectable_value(&mut f.lang_idx, i, nm);
-                                    }
+                            egui::CollapsingHeader::new(self.t("settings.behavior", &[]))
+                                .default_open(true)
+                                .show(&mut *ui, |ui| {
+                                    ui.checkbox(&mut f.copy_select, self.t("settings.copy_select", &[]));
+                                    ui.checkbox(&mut f.tray, self.t("settings.tray", &[]));
+                                    let tags = i18n::supported();
+                                    let names: Vec<String> = tags
+                                        .iter()
+                                        .map(|t| i18n::native_name(t).to_string())
+                                        .collect();
+                                    let cur = names.get(f.lang_idx).cloned().unwrap_or_default();
+                                    ui.horizontal(|ui| {
+                                        ui.label(self.t("settings.lang", &[]));
+                                        egui::ComboBox::from_id_salt("lang")
+                                            .selected_text(cur)
+                                            .show_ui(ui, |ui| {
+                                                for (i, nm) in names.iter().enumerate() {
+                                                    ui.selectable_value(&mut f.lang_idx, i, nm);
+                                                }
+                                            });
+                                    });
                                 });
-                        });
-                        let theme_names = [
-                            self.t("theme.system", &[]),
-                            self.t("theme.light", &[]),
-                            self.t("theme.dark", &[]),
-                        ];
-                        let theme_cur = theme_names.get(f.theme_idx).cloned().unwrap_or_default();
-                        ui.horizontal(|ui| {
-                            ui.label(self.t("settings.theme", &[]));
-                            egui::ComboBox::from_id_salt("theme")
-                                .selected_text(theme_cur)
-                                .show_ui(ui, |ui| {
-                                    for (i, nm) in theme_names.iter().enumerate() {
-                                        ui.selectable_value(&mut f.theme_idx, i, nm);
-                                    }
-                                });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(self.t("settings.new_pw", &[]));
-                            ui.add(egui::TextEdit::singleline(&mut f.new_pw).password(true));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(self.t("settings.repeat_pw", &[]));
-                            ui.add(egui::TextEdit::singleline(&mut f.repeat_pw).password(true));
-                        });
-                        if !f.new_pw.is_empty() {
-                            let s = password_strength(&f.new_pw);
-                            ui.label(self.t("pw.strength", &[i64::from(s).into()]));
-                        }
-                        ui.horizontal(|ui| {
-                            if ui.button(self.t("btn.save", &[])).clicked() {
-                                go = true;
-                            }
-                            if ui.button(self.t("btn.cancel", &[])).clicked() {
-                                cancelled = true;
-                            }
+                            ui.horizontal(|ui| {
+                                if ui.button(self.t("btn.save", &[])).clicked() {
+                                    go = true;
+                                }
+                                if ui.button(self.t("btn.cancel", &[])).clicked() {
+                                    cancelled = true;
+                                }
+                            });
                         });
                     });
                 if go {
@@ -2164,14 +2572,30 @@ impl TotpApp {
             }
             Dialog::About => {
                 let mut open = true;
+                let mut copy_path = false;
                 egui::Window::new(self.t("about.title", &[]))
                     .open(&mut open)
                     .show(&*ui, |ui| {
                         ui.label(self.t("about.body", &[self.path.clone().into()]));
+                        ui.horizontal(|ui| {
+                            ui.weak(self.path.clone());
+                            if ui.small_button(self.t("about.copy_path", &[])).clicked() {
+                                copy_path = true;
+                            }
+                        });
                         ui.add_space(8.0);
                         ui.label(self.t("about.keys", &[]));
+                        ui.label(self.t("about.keys2", &[]));
                     });
-                if open {
+                if copy_path {
+                    self.touch();
+                    if let Ok(mut cb) = arboard::Clipboard::new() {
+                        let _ = cb.set_text(self.path.clone());
+                    }
+                    let msg = self.t("status.uri_copied", &[]);
+                    self.status = msg.clone();
+                    self.toast(msg);
+                } else if open {
                     self.dialog = Dialog::About;
                 }
             }
@@ -2503,11 +2927,68 @@ mod tests {
                 "btn.backup",
                 "backup.title",
                 "status.backup_ok",
+                "main.clear",
+                "main.empty_title",
+                "main.empty_hint",
+                "main.no_results",
+                "card.copy_tip",
+                "status.clears_in",
+                "settings.security",
+                "settings.appearance",
+                "settings.behavior",
+                "acct.show_secret",
+                "acct.hide_secret",
+                "acct.preview",
+                "acct.live_invalid",
+                "about.copy_path",
+                "about.keys2",
             ] {
                 let s = i18n::get(lang, key, &[0.into(), "x".into()]);
                 assert!(!s.is_empty() && s != key, "{key} missing in {lang}");
             }
         }
+    }
+
+    #[test]
+    fn move_selection_wraps_and_keeps_index() {
+        assert_eq!(move_selection(&[], None, 1), None);
+        assert_eq!(move_selection(&[5], None, 1), Some(5));
+        assert_eq!(move_selection(&[1, 2, 3], Some(2), 1), Some(3));
+        assert_eq!(move_selection(&[1, 2, 3], Some(3), 1), Some(1));
+        assert_eq!(move_selection(&[1, 2, 3], Some(1), -1), Some(3));
+        assert_eq!(move_selection(&[1, 2, 3], Some(9), 1), Some(1));
+    }
+
+    #[test]
+    fn clipboard_secs_left_rounds_up() {
+        let t0 = Instant::now();
+        assert_eq!(clipboard_secs_left(t0, t0), 0);
+        assert_eq!(
+            clipboard_secs_left(t0 + Duration::from_secs(15), t0),
+            15
+        );
+        assert_eq!(
+            clipboard_secs_left(t0 + Duration::from_millis(1500), t0),
+            2
+        );
+        assert_eq!(clipboard_secs_left(t0, t0 + Duration::from_secs(1)), 0);
+    }
+
+    #[test]
+    fn preview_code_validates_before_render() {
+        let good = preview_code(
+            "alice",
+            "Example",
+            "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+            "6",
+            "30",
+            "SHA1",
+            0,
+        );
+        assert!(good.is_some());
+        assert!(preview_code("alice", "Example", "!!!", "6", "30", "SHA1", 0).is_none());
+        assert!(preview_code("alice", "Example", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "7", "30", "SHA1", 0).is_none());
+        assert!(preview_code("", "Example", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "6", "30", "SHA1", 0).is_none());
     }
 
     #[test]
