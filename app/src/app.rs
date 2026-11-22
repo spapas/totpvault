@@ -124,6 +124,19 @@ pub fn backup_dest_default(vault_path: &str) -> String {
     format!("{vault_path}.bak")
 }
 
+/// Display form of the vault path: strip the Windows verbatim `\\?\` prefix
+/// produced by `canonicalize` (`\\?\C:\...` → `C:\...`,
+/// `\\?\UNC\srv\share` → `\\srv\share`). Pure.
+pub fn display_vault_path(p: &str) -> String {
+    if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = p.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        p.to_string()
+    }
+}
+
 /// True when the wall clock jumped clearly backwards (codes may be wrong).
 /// Pure: both inputs are Unix seconds, 0 = unknown clock.
 pub fn clock_went_backwards(prev_wall: i64, now_wall: i64) -> bool {
@@ -154,11 +167,7 @@ pub fn font_idx_from_scale(scale: f32) -> usize {
 
 /// Move keyboard selection inside `visible` (which holds account indices).
 /// `delta` is +1 (Down) / -1 (Up); wraps around. Pure.
-pub fn move_selection(
-    visible: &[usize],
-    selected: Option<usize>,
-    delta: isize,
-) -> Option<usize> {
+pub fn move_selection(visible: &[usize], selected: Option<usize>, delta: isize) -> Option<usize> {
     if visible.is_empty() {
         return None;
     }
@@ -1290,6 +1299,38 @@ fn lock_mark(ui: &mut egui::Ui, dark: bool) {
     );
 }
 
+/// Eye-icon toggle for password fields (vector-drawn, no font glyphs).
+/// Open eye = text visible (`show`); slashed eye = hidden.
+/// Returns true when clicked. `height` should match the neighbor field.
+fn eye_toggle(
+    ui: &mut egui::Ui,
+    height: f32,
+    show: bool,
+    tip: &str,
+    accent: egui::Color32,
+) -> bool {
+    let b = ui
+        .add_sized(egui::vec2(30.0, height), egui::Button::new(""))
+        .on_hover_text(tip);
+    let p = ui.painter_at(b.rect);
+    let c = b.rect.center();
+    let col = if b.hovered() || b.has_focus() {
+        accent
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    let stroke = egui::Stroke::new(1.5, col);
+    p.add(egui::Shape::ellipse_stroke(c, egui::vec2(8.0, 5.0), stroke));
+    p.circle_filled(c, 2.0, col);
+    if !show {
+        p.line_segment(
+            [c + egui::vec2(-6.5, 4.5), c + egui::vec2(6.5, -4.5)],
+            stroke,
+        );
+    }
+    b.clicked()
+}
+
 #[cfg(windows)]
 fn system_dark_mode() -> bool {
     // HKCU\...\Personalize\AppsUseLightTheme: 0 = dark, 1 = light.
@@ -1365,7 +1406,10 @@ impl eframe::App for TotpApp {
                 } else if i.consume_key(egui::Modifiers::NONE, egui::Key::Slash) {
                     want_focus_search = true;
                 }
-            } else if no_dialog && wants_kb && i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+            } else if no_dialog
+                && wants_kb
+                && i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+            {
                 // Esc while typing in search: clear it (selection follows).
                 want_esc = true;
             }
@@ -1389,7 +1433,7 @@ impl eframe::App for TotpApp {
         if want_focus_search {
             self.touch();
             ui.memory_mut(|m| {
-                m.request_focus(egui::Id::new("search-field"));
+                m.request_focus(egui::Id::unique("search-field"));
             });
         }
         self.show_main(ui);
@@ -1434,25 +1478,35 @@ impl TotpApp {
                         m.request_focus(egui::Id::unique("login-password"));
                     });
                 }
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut self.login.password)
-                        .id(egui::Id::unique("login-password"))
-                        .password(!self.login.show_pw)
-                        .hint_text(ph_hint)
-                        .desired_width(300.0),
-                );
-                ui.horizontal(|ui| {
-                    let eye = if self.login.show_pw {
-                        self.t("acct.hide_secret", &[])
-                    } else {
-                        self.t("acct.show_secret", &[])
-                    };
-                    if ui.small_button(eye).clicked() {
-                        self.touch();
-                        self.login.show_pw = !self.login.show_pw;
-                    }
-                    ui.weak(self.path.clone());
-                });
+                let eye_tip = if self.login.show_pw {
+                    self.t("acct.hide_secret", &[])
+                } else {
+                    self.t("acct.show_secret", &[])
+                };
+                // Centered row: fixed content width plus manual side padding
+                // (a bare `horizontal` would stick to the left edge).
+                let resp = ui
+                    .horizontal_centered(|ui| {
+                        const ROW_W: f32 = 286.0; // 250 field + 6 gap + 30 eye
+                        let pad = ((ui.available_width() - ROW_W) / 2.0).max(0.0);
+                        ui.add_space(pad);
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let r = ui.add(
+                            egui::TextEdit::singleline(&mut self.login.password)
+                                .id(egui::Id::unique("login-password"))
+                                .password(!self.login.show_pw)
+                                .hint_text(ph_hint)
+                                .desired_width(250.0),
+                        );
+                        let accent = if self.dark { ACCENT_DARK } else { ACCENT_LIGHT };
+                        if eye_toggle(ui, r.rect.height(), self.login.show_pw, &eye_tip, accent) {
+                            self.touch();
+                            self.login.show_pw = !self.login.show_pw;
+                        }
+                        r
+                    })
+                    .inner;
+                ui.weak(display_vault_path(&self.path));
                 if self.login.create {
                     let rp_hint = self.t("login.ph_repeat", &[]);
                     ui.add(
@@ -1528,7 +1582,7 @@ impl TotpApp {
                 };
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut self.search)
-                        .id(egui::Id::new("search-field"))
+                        .id(egui::Id::unique("search-field"))
                         .hint_text(search_hint)
                         .desired_width(edit_w),
                 );
@@ -1619,14 +1673,6 @@ impl TotpApp {
                     });
                 });
             });
-            // Toast: transient confirmation above the list (Copy/Pin/Backup).
-            if let Some((msg, at)) = &self.toast {
-                if at.elapsed() < Duration::from_millis(2500) {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(msg).strong());
-                    });
-                }
-            }
         });
         // Status: base text plus live clipboard countdown.
         egui::Panel::bottom("status").show(&mut *ui, |ui| {
@@ -1636,7 +1682,7 @@ impl TotpApp {
                 if secs > 0 {
                     text = format!(
                         "{text} • {}",
-                        self.t("status.clears_in", &[i64::from(secs).into()])
+                        self.t("status.clears_in", &[(secs as i64).into()])
                     );
                 }
             }
@@ -1658,7 +1704,10 @@ impl TotpApp {
                             import = true;
                         }
                         if ui
-                            .add_enabled(!self.qr_reading, egui::Button::new(self.t("btn.paste_qr", &[])))
+                            .add_enabled(
+                                !self.qr_reading,
+                                egui::Button::new(self.t("btn.paste_qr", &[])),
+                            )
                             .clicked()
                         {
                             paste_qr = true;
@@ -1680,6 +1729,17 @@ impl TotpApp {
                     let accent = if self.dark { ACCENT_DARK } else { ACCENT_LIGHT };
                     let pin_tip = self.t("pin.tip", &[]);
                     let copy_tip = self.t("card.copy_tip", &[]);
+                    // The painted copy button sizes to its label so longer
+                    // translations (e.g. "Αντιγραφή") are never clipped.
+                    let copy_label = self.t("btn.copy", &[]);
+                    let copy_font = egui::FontId::proportional(12.0);
+                    let copy_w = (ui
+                        .painter()
+                        .layout_no_wrap(copy_label.clone(), copy_font.clone(), egui::Color32::WHITE)
+                        .size()
+                        .x
+                        + 20.0)
+                        .max(52.0);
                     let mut clicked: Option<usize> = None;
                     let mut double_clicked: Option<usize> = None;
                     let mut toggle_pin: Option<usize> = None;
@@ -1735,11 +1795,7 @@ impl TotpApp {
                                         let ring_sz = if self.compact { 40.0 } else { 52.0 };
                                         if self.compact {
                                             countdown_ring_sized(
-                                                ui,
-                                                frac,
-                                                rem as i64,
-                                                accent,
-                                                ring_sz,
+                                                ui, frac, rem as i64, accent, ring_sz,
                                             );
                                         } else {
                                             countdown_ring(ui, frac, rem as i64, accent);
@@ -1756,7 +1812,7 @@ impl TotpApp {
                                         // Per-card copy button: explicit target,
                                         // no selection round-trip needed.
                                         let (cslot, _) = ui.allocate_exact_size(
-                                            egui::vec2(52.0, 28.0),
+                                            egui::vec2(copy_w, 28.0),
                                             egui::Sense::hover(),
                                         );
                                         copy_slot = Some(cslot);
@@ -1847,7 +1903,11 @@ impl TotpApp {
                                 .on_hover_text(&copy_tip)
                                 .on_hover_cursor(egui::CursorIcon::PointingHand);
                             let p = ui.painter_at(slot);
-                            let col = if cresp.hovered() { accent } else { ui.visuals().weak_text_color() };
+                            let col = if cresp.hovered() {
+                                accent
+                            } else {
+                                ui.visuals().weak_text_color()
+                            };
                             p.rect_stroke(
                                 slot.shrink(2.0),
                                 6.0,
@@ -1857,8 +1917,8 @@ impl TotpApp {
                             p.text(
                                 slot.center(),
                                 egui::Align2::CENTER_CENTER,
-                                self.t("btn.copy", &[]),
-                                egui::FontId::proportional(12.0),
+                                copy_label.clone(),
+                                copy_font.clone(),
                                 col,
                             );
                             if cresp.clicked() {
@@ -1967,6 +2027,7 @@ impl TotpApp {
                     digits: a.digits.to_string(),
                     period: a.period.to_string(),
                     algorithm: a.algorithm,
+                    show_secret: false,
                 });
             }
         }
@@ -2027,6 +2088,21 @@ impl TotpApp {
         if lock {
             self.lock();
         }
+        // Toast overlay (Copy/Pin/Backup confirmations): a floating area so
+        // it never pushes the list down/up when it appears or expires.
+        if let Some((msg, at)) = &self.toast
+            && at.elapsed() < Duration::from_millis(2500)
+        {
+            egui::Area::new(egui::Id::unique("toast-overlay"))
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -16.0))
+                .order(egui::Order::Foreground)
+                .interactable(false)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.label(egui::RichText::new(msg).strong());
+                    });
+                });
+        }
     }
 
     fn show_dialog(&mut self, ui: &mut egui::Ui) {
@@ -2039,60 +2115,73 @@ impl TotpApp {
                 egui::Window::new(self.t(if f.is_edit { "acct.edit" } else { "acct.add" }, &[]))
                     .open(&mut open)
                     .show(&*ui, |ui| {
-                        egui::Grid::new("acct-grid").num_columns(2).spacing([8.0, 8.0]).show(ui, |ui| {
-                            ui.label(self.t("acct.f_account", &[]));
-                            ui.text_edit_singleline(&mut f.name);
-                            ui.end_row();
-                            ui.label(self.t("acct.f_issuer", &[]));
-                            ui.text_edit_singleline(&mut f.issuer);
-                            ui.end_row();
-                            ui.label(self.t("acct.f_secret", &[]));
-                            ui.horizontal(|ui| {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut f.secret)
-                                        .password(!f.show_secret),
-                                );
-                                let eye = if f.show_secret {
-                                    self.t("acct.hide_secret", &[])
-                                } else {
-                                    self.t("acct.show_secret", &[])
-                                };
-                                if ui.small_button(eye).clicked() {
-                                    f.show_secret = !f.show_secret;
-                                }
-                            });
-                            ui.end_row();
-                            ui.label(self.t("acct.f_digits", &[]));
-                            egui::ComboBox::from_id_salt("digits")
-                                .selected_text(&f.digits)
-                                .show_ui(ui, |ui| {
-                                    for d in ["6", "8"] {
-                                        ui.selectable_value(&mut f.digits, d.to_string(), d);
+                        egui::Grid::new("acct-grid")
+                            .num_columns(2)
+                            .spacing([8.0, 8.0])
+                            .show(ui, |ui| {
+                                ui.label(self.t("acct.f_account", &[]));
+                                ui.text_edit_singleline(&mut f.name);
+                                ui.end_row();
+                                ui.label(self.t("acct.f_issuer", &[]));
+                                ui.text_edit_singleline(&mut f.issuer);
+                                ui.end_row();
+                                ui.label(self.t("acct.f_secret", &[]));
+                                ui.horizontal(|ui| {
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut f.secret)
+                                            .password(!f.show_secret),
+                                    );
+                                    let tip = if f.show_secret {
+                                        self.t("acct.hide_secret", &[])
+                                    } else {
+                                        self.t("acct.show_secret", &[])
+                                    };
+                                    let accent = if self.dark { ACCENT_DARK } else { ACCENT_LIGHT };
+                                    if eye_toggle(ui, r.rect.height(), f.show_secret, &tip, accent)
+                                    {
+                                        f.show_secret = !f.show_secret;
                                     }
                                 });
-                            ui.end_row();
-                            ui.label(self.t("acct.f_period", &[]));
-                            ui.horizontal(|ui| {
-                                egui::ComboBox::from_id_salt("period")
-                                    .selected_text(&f.period)
+                                ui.end_row();
+                                ui.label(self.t("acct.f_digits", &[]));
+                                egui::ComboBox::from_id_salt("digits")
+                                    .selected_text(&f.digits)
                                     .show_ui(ui, |ui| {
-                                        for p in ["15", "30", "60"] {
-                                            ui.selectable_value(&mut f.period, p.to_string(), p);
+                                        for d in ["6", "8"] {
+                                            ui.selectable_value(&mut f.digits, d.to_string(), d);
                                         }
                                     });
-                                ui.text_edit_singleline(&mut f.period);
-                            });
-                            ui.end_row();
-                            ui.label(self.t("acct.f_algo", &[]));
-                            egui::ComboBox::from_id_salt("algo")
-                                .selected_text(&f.algorithm)
-                                .show_ui(ui, |ui| {
-                                    for al in ["SHA1", "SHA256", "SHA512"] {
-                                        ui.selectable_value(&mut f.algorithm, al.to_string(), al);
-                                    }
+                                ui.end_row();
+                                ui.label(self.t("acct.f_period", &[]));
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_id_salt("period")
+                                        .selected_text(&f.period)
+                                        .show_ui(ui, |ui| {
+                                            for p in ["15", "30", "60"] {
+                                                ui.selectable_value(
+                                                    &mut f.period,
+                                                    p.to_string(),
+                                                    p,
+                                                );
+                                            }
+                                        });
+                                    ui.text_edit_singleline(&mut f.period);
                                 });
-                            ui.end_row();
-                        });
+                                ui.end_row();
+                                ui.label(self.t("acct.f_algo", &[]));
+                                egui::ComboBox::from_id_salt("algo")
+                                    .selected_text(&f.algorithm)
+                                    .show_ui(ui, |ui| {
+                                        for al in ["SHA1", "SHA256", "SHA512"] {
+                                            ui.selectable_value(
+                                                &mut f.algorithm,
+                                                al.to_string(),
+                                                al,
+                                            );
+                                        }
+                                    });
+                                ui.end_row();
+                            });
                         // Live preview + inline validation before Save.
                         let now = now_unix();
                         if let Some(code) = preview_code(
@@ -2412,18 +2501,31 @@ impl TotpApp {
                                             .selected_text(&f.idle)
                                             .show_ui(ui, |ui| {
                                                 for m in ["1", "2", "5", "10", "15"] {
-                                                    ui.selectable_value(&mut f.idle, m.to_string(), m);
+                                                    ui.selectable_value(
+                                                        &mut f.idle,
+                                                        m.to_string(),
+                                                        m,
+                                                    );
                                                 }
                                             });
                                     });
-                                    ui.checkbox(&mut f.lock_focus, self.t("settings.lock_focus", &[]));
+                                    ui.checkbox(
+                                        &mut f.lock_focus,
+                                        self.t("settings.lock_focus", &[]),
+                                    );
                                     ui.horizontal(|ui| {
                                         ui.label(self.t("settings.new_pw", &[]));
-                                        ui.add(egui::TextEdit::singleline(&mut f.new_pw).password(true));
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut f.new_pw)
+                                                .password(true),
+                                        );
                                     });
                                     ui.horizontal(|ui| {
                                         ui.label(self.t("settings.repeat_pw", &[]));
-                                        ui.add(egui::TextEdit::singleline(&mut f.repeat_pw).password(true));
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut f.repeat_pw)
+                                                .password(true),
+                                        );
                                     });
                                     if !f.new_pw.is_empty() {
                                         let s = password_strength(&f.new_pw);
@@ -2448,7 +2550,11 @@ impl TotpApp {
                                             .selected_text(font_cur)
                                             .show_ui(ui, |ui| {
                                                 for (i, nm) in font_labels.iter().enumerate() {
-                                                    ui.selectable_value(&mut f.font_idx, i, nm.to_string());
+                                                    ui.selectable_value(
+                                                        &mut f.font_idx,
+                                                        i,
+                                                        nm.to_string(),
+                                                    );
                                                 }
                                             });
                                     });
@@ -2473,7 +2579,10 @@ impl TotpApp {
                             egui::CollapsingHeader::new(self.t("settings.behavior", &[]))
                                 .default_open(true)
                                 .show(&mut *ui, |ui| {
-                                    ui.checkbox(&mut f.copy_select, self.t("settings.copy_select", &[]));
+                                    ui.checkbox(
+                                        &mut f.copy_select,
+                                        self.t("settings.copy_select", &[]),
+                                    );
                                     ui.checkbox(&mut f.tray, self.t("settings.tray", &[]));
                                     let tags = i18n::supported();
                                     let names: Vec<String> = tags
@@ -2701,6 +2810,16 @@ mod tests {
     fn backup_dest_appends_bak() {
         assert_eq!(backup_dest_default("vault.dat"), "vault.dat.bak");
         assert_eq!(backup_dest_default("a/b/v.dat"), "a/b/v.dat.bak");
+    }
+
+    #[test]
+    fn display_path_strips_verbatim_prefix() {
+        assert_eq!(display_vault_path(r"\\?\C:\a\vault.dat"), r"C:\a\vault.dat");
+        assert_eq!(
+            display_vault_path(r"\\?\UNC\srv\share\v.dat"),
+            r"\\srv\share\v.dat"
+        );
+        assert_eq!(display_vault_path("/home/u/vault.dat"), "/home/u/vault.dat");
     }
 
     #[test]
@@ -2963,14 +3082,8 @@ mod tests {
     fn clipboard_secs_left_rounds_up() {
         let t0 = Instant::now();
         assert_eq!(clipboard_secs_left(t0, t0), 0);
-        assert_eq!(
-            clipboard_secs_left(t0 + Duration::from_secs(15), t0),
-            15
-        );
-        assert_eq!(
-            clipboard_secs_left(t0 + Duration::from_millis(1500), t0),
-            2
-        );
+        assert_eq!(clipboard_secs_left(t0 + Duration::from_secs(15), t0), 15);
+        assert_eq!(clipboard_secs_left(t0 + Duration::from_millis(1500), t0), 2);
         assert_eq!(clipboard_secs_left(t0, t0 + Duration::from_secs(1)), 0);
     }
 
@@ -2987,8 +3100,30 @@ mod tests {
         );
         assert!(good.is_some());
         assert!(preview_code("alice", "Example", "!!!", "6", "30", "SHA1", 0).is_none());
-        assert!(preview_code("alice", "Example", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "7", "30", "SHA1", 0).is_none());
-        assert!(preview_code("", "Example", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "6", "30", "SHA1", 0).is_none());
+        assert!(
+            preview_code(
+                "alice",
+                "Example",
+                "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+                "7",
+                "30",
+                "SHA1",
+                0
+            )
+            .is_none()
+        );
+        assert!(
+            preview_code(
+                "",
+                "Example",
+                "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+                "6",
+                "30",
+                "SHA1",
+                0
+            )
+            .is_none()
+        );
     }
 
     #[test]

@@ -425,7 +425,10 @@ const EXTRA: &[(&str, &[(&str, &str)])] = &[
                 "main.empty_hint",
                 "Προσθέστε, εισαγάγετε URI ή επικολλήστε QR για να ξεκινήσετε.",
             ),
-            ("main.no_results", "Καμία αντιστοίχιση — δοκιμάστε άλλη αναζήτηση"),
+            (
+                "main.no_results",
+                "Καμία αντιστοίχιση — δοκιμάστε άλλη αναζήτηση",
+            ),
             ("card.copy_tip", "Αντιγραφή κωδικού"),
             ("status.clears_in", "καθαρισμός σε %ds"),
             ("settings.security", "Ασφάλεια"),
@@ -575,7 +578,10 @@ const EXTRA: &[(&str, &[(&str, &str)])] = &[
                 "main.empty_hint",
                 "Ajoutez, importez une URI ou collez un QR pour commencer.",
             ),
-            ("main.no_results", "Aucun résultat — essayez une autre recherche"),
+            (
+                "main.no_results",
+                "Aucun résultat — essayez une autre recherche",
+            ),
             ("card.copy_tip", "Copier ce code"),
             ("status.clears_in", "efface dans %ds"),
             ("settings.security", "Sécurité"),
@@ -647,7 +653,10 @@ const EXTRA: &[(&str, &[(&str, &str)])] = &[
                 "main.empty_hint",
                 "Aggiungi, importa un URI o incolla un QR per iniziare.",
             ),
-            ("main.no_results", "Nessuna corrispondenza — prova un'altra ricerca"),
+            (
+                "main.no_results",
+                "Nessuna corrispondenza — prova un'altra ricerca",
+            ),
             ("card.copy_tip", "Copia questo codice"),
             ("status.clears_in", "cancella tra %ds"),
             ("settings.security", "Sicurezza"),
@@ -719,12 +728,14 @@ const EXTRA: &[(&str, &[(&str, &str)])] = &[
             ("acct.show_secret", "显示"),
             ("acct.hide_secret", "隐藏"),
             ("about.copy_path", "复制路径"),
-            ("about.keys2", "更多：/ 聚焦搜索 • Esc 清除 • 上/下选择 • 按卡复制。"),
+            (
+                "about.keys2",
+                "更多：/ 聚焦搜索 • Esc 清除 • 上/下选择 • 按卡复制。",
+            ),
             ("acct.preview", "预览"),
             ("acct.live_invalid", "填写有效的 Base32 密钥以预览验证码。"),
         ],
     ),
-];
 ];
 
 /// Translated template for `key` in `lang`, formatted with `args`.
