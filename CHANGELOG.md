@@ -5,6 +5,8 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-11-24
+
 ### Added
 
 - UI/UX pass: per-card Copy button + right-click menu (Copy/Edit/Export/
@@ -20,6 +22,15 @@ Versions are `X.Y.Z` and release tags are `vX.Y.Z` (must match `VERSION`).
 - Supply-chain gates: `cargo-deny` policy (`deny.toml`: crates.io-only,
   permissive licenses, no wildcards) enforced in CI, plus an informational
   `cargo-geiger` unsafe-usage report.
+- Dependabot: weekly Cargo and GitHub Actions update PRs.
+
+### Changed
+
+- Dependencies: `rand` 0.8 → 0.10, `qrcode` 0.14 → 0.15, plus lockfile patch
+  bumps (`ahash`, `crc32fast`, `litrs`, `zlib-rs`).
+- Single-instance lock uses `std::fs::File::try_lock`; dropped `fs2`
+  (unmaintained upstream) and avoided adding `fs4`.
+- CI: `actions/checkout` v6 → v7.
 
 ## [3.1.0] - 2026-11-15
 

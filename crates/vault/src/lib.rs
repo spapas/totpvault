@@ -8,7 +8,7 @@
 use aead::AeadInOut;
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
-use rand::RngCore;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::convert::TryFrom;
 use std::fs::{self, File, OpenOptions};
@@ -147,7 +147,7 @@ fn encrypt_with(key: &[u8; 32], salt: &[u8; 16], accounts: &[Account]) -> Result
     let mut header = [0u8; HEADER_SIZE];
     header[..8].copy_from_slice(&MAGIC);
     header[8..24].copy_from_slice(salt);
-    rand::thread_rng().fill_bytes(&mut header[24..48]);
+    rand::rng().fill_bytes(&mut header[24..48]);
     if header.len() + plain.len() + 16 > MAX_FILE_SIZE {
         return Err(Error::TooBig);
     }
@@ -189,7 +189,7 @@ impl Session {
     pub fn create(path: &Path, password: &str) -> Result<Session, Error> {
         check_password(password)?;
         let mut salt = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut salt);
+        rand::rng().fill_bytes(&mut salt);
         let key = derive(password, &salt);
         let data = encrypt_with(&key, &salt, &[])?;
         ensure_parent_dir(path)?;
@@ -303,7 +303,7 @@ impl Session {
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
         let mut rnd = [0u8; 8];
-        rand::thread_rng().fill_bytes(&mut rnd);
+        rand::rng().fill_bytes(&mut rnd);
         let tmp = parent.join(format!(
             ".totpvault-{}",
             rnd.iter().map(|x| format!("{:02x}", x)).collect::<String>()
@@ -349,7 +349,7 @@ impl Session {
         }
         check_password(password)?;
         let mut salt = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut salt);
+        rand::rng().fill_bytes(&mut salt);
         let key = derive(password, &salt);
         let b = encrypt_with(&key, &salt, &self.accounts)?;
         self.replace(&b)?;
@@ -367,7 +367,7 @@ mod tests {
     fn tmp() -> PathBuf {
         let mut p = std::env::temp_dir();
         let mut rnd = [0u8; 8];
-        rand::thread_rng().fill_bytes(&mut rnd);
+        rand::rng().fill_bytes(&mut rnd);
         p.push(format!(
             "totpvault-test-{}",
             rnd.iter().map(|x| format!("{:02x}", x)).collect::<String>()

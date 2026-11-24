@@ -20,7 +20,7 @@ each other's `vault.dat`.
 ┌─────────────┐   --vault path    ┌──────────────┐
 │ app/main.rs  │ ────────────────▶ │ app/app.rs   │  egui controller
 │ default path │  .dat.lock file   │ TotpApp      │ ─┐
-│ 0700 dir     │  fs2 lock         └──────────────┘  │
+│ 0700 dir     │  std lock         └──────────────┘  │
 └─────────────┘                                     │ uses
         │                                           ▼
         │ default path                ┌────────────────────┐
@@ -41,7 +41,7 @@ each other's `vault.dat`.
    (`dirs::data_dir()` + `TotpVault/vault.dat`; Windows `%APPDATA%`, Linux
    `$XDG_DATA_HOME` or `~/.local/share`, macOS `~/Library/Application Support`).
 2. `create_dir_all` + `0700` on Unix.
-3. `fs2::FileExt::try_lock_exclusive` on `vault.dat.lock` — second instance
+3. `std::fs::File::try_lock` (exclusive) on `vault.dat.lock` — second instance
    shows a fatal dialog and exits.
 4. Loads language/theme prefs, then `eframe::run_native("TOTP Vault", …)`.
    `#![windows_subsystem = "windows"]` keeps double-click launches console-free;
@@ -197,7 +197,7 @@ layer does, so non-TOTP QR content fails closed at the same gate as typed URIs.
   Vault `Session` is serialized through the UI flow + stale-session checks.
 - **Errors:** user-facing via inline label (login) or error window (main);
   crypto errors intentionally vague (`Authentication`).
-- **No network:** `Cargo.toml` = `eframe` (glow) + `arboard` + `fs2` + `dirs` +
+- **No network:** `Cargo.toml` = `eframe` (glow) + `arboard` + `dirs` +
   `image` + `rqrr` + crypto (`argon2`, `chacha20poly1305`, `hmac`, `sha1/2`) +
   `sys-locale` only. Adding any dialing dependency violates the threat model.
 - **Testing:** `cargo test --locked` — RFC vectors, countdown, URI

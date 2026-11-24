@@ -1,6 +1,6 @@
 [package]
 name = "totpvault-qrimg"
-version = "3.1.0"
+version = "3.2.0"
 edition = "2024"
 license = "MIT"
 
@@ -10,5 +10,5 @@ rqrr = "0.11.0"
 thiserror = "2.0.21"
 
 [dev-dependencies]
-qrcode = "0.14.1"
-totpvault-totp = { version = "3.1.0", path = "../totp" }
+qrcode = "0.15.0"
+totpvault-totp = { version = "3.2.0", path = "../totp" }

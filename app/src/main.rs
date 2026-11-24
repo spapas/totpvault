@@ -95,8 +95,7 @@ fn main() {
         show_fatal(&format!("{}: {e}", lock_path.display()));
     });
     {
-        use fs2::FileExt;
-        if lock_file.try_lock_exclusive().is_err() {
+        if lock_file.try_lock().is_err() {
             show_fatal("this vault is already open in another instance");
         }
     }

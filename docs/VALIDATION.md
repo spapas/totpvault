@@ -102,3 +102,21 @@ click-regression test.
 - `cargo audit`: no new advisories.
 - Pin toggle manually verified on Windows (star fills, card jumps on top,
   status confirms pin/unpin).
+
+## 3.2.0 — 24 November 2026 (Europe/Athens)
+
+Minor release on vault format v1 (unchanged): UI/UX pass (per-card copy,
+keyboard flow, search, onboarding, grouped settings) and hostile-input
+robustness tests; dependency refresh (`rand` 0.10, `qrcode` 0.15) and the
+single-instance lock moved to `std::fs::File::try_lock`, dropping `fs2`.
+
+- `cargo test --locked`: passed (21 app, 6 i18n, 4 vault, 6 totp, 6 qrimg
+  incl. Go interop and QR round-trip).
+- `cargo fmt --check` / `cargo clippy --all-targets --locked -- -D warnings`:
+  passed locally on Windows; repeated by CI on all three platforms.
+- `cargo audit`: no vulnerabilities; only the ignored unmaintained zbus
+  advisories (`ksni` still pins `zbus` 5).
+- `cargo build --locked --release -p totpvault`: passed (Windows MSVC,
+  Rust 1.100.0).
+- Manual desktop walkthrough of the new UI/UX pass (tray, QR scan against a
+  phone, backup restore) still pending against the release binaries.

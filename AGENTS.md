@@ -12,7 +12,7 @@ Read `ARCHITECTURE.md` and `SECURITY.md` before changing `crates/totp`,
 
 | Path | What lives there |
 |---|---|
-| `app/src/main.rs` | Entry point: `--vault` flag, default path, `0700` dir creation, single-instance `fs2` lock, then `eframe::run_native` |
+| `app/src/main.rs` | Entry point: `--vault` flag, default path, `0700` dir creation, single-instance `File::try_lock`, then `eframe::run_native` |
 | `app/src/app.rs` | egui controller: login → main list → dialogs, 500 ms repaint tick (codes, clipboard expiry, auto-lock), `Paste QR` via `arboard` image clipboard + `qrimg` + `parse_uri` |
 | `app/src/prefs.rs` | Non-secret `language` + `theme` in `TotpVault/prefs.json` (OS config dir) |
 | `crates/totp` | RFC 6238 `code()`, `normalize()`, `parse_uri()`/`provisioning_uri()` — pure, no I/O |
@@ -97,7 +97,7 @@ python3 crates/i18n/gen_tables.py            # archived/go tables -> tables.rs
    visible / system.
 6. **Keep it offline.** No new dependencies that dial network, no auto-update,
    no camera capture, no bulk export/import. Pinned offline exceptions: `arboard`
-   (OS clipboard), `fs2` (file lock), `rqrr` (QR decode), `eframe/glow` (GUI).
+   (OS clipboard), `rqrr` (QR decode), `eframe/glow` (GUI).
    If you add a dep, keep `Cargo.lock` committed and ensure `cargo audit` stays clean.
 7. **Permissions.** POSIX vault `0600`, dirs `0700`. Windows/macOS rely on profile
    directory ACLs — don't chmod around them.
